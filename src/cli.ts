@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as readline from "node:readline/promises";
@@ -10,11 +10,13 @@ import ora from "ora";
 import { Agent } from "./agent/agent.js";
 import { createLLMProvider } from "./agent/llm.js";
 import { SESSION_HELP } from "./agent/prompts.js";
+import { executeTool } from "./agent/tools.js";
 import { ensureDataDirs, getDataPaths, loadConfig } from "./config/config.js";
 import { MemoryStore } from "./memory/memory.js";
 import type { LearningInsight } from "./taste/schema.js";
 import { TasteManager } from "./taste/taste.js";
 import { logger } from "./utils/logger.js";
+import type { FuelType } from "./vehicles/schema.js";
 import { VehicleStore } from "./vehicles/vehicles.js";
 
 interface PendingAnswer {
@@ -28,7 +30,7 @@ export function buildProgram(): Command {
   program
     .name("codebase")
     .description("Terminal-first AI vehicle agent that learns your taste")
-    .version("0.2.0");
+    .version("0.3.0");
 
   program
     .command("chat", { isDefault: true })
@@ -101,7 +103,10 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   const taste = new TasteManager(paths);
   const memory = new MemoryStore(paths);
   const vehicles = new VehicleStore(paths);
-  const agent = new Agent(config, taste, memory, vehicles);
+  const agent = new Agent(config, taste, memory, vehicles, paths);
+
+  const active = vehicles.getActive();
+  if (active) memory.setActiveVehicle(active.id);
 
   logger.banner();
   logger.info(`Data: ${paths.root}`);
@@ -113,6 +118,13 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
   } else {
     logger.dim(`  model: ${config.ollama.model} @ ${config.ollama.baseUrl}`);
+  }
+  if (active) {
+    logger.info(
+      `Active vehicle: ${active.year} ${active.make} ${active.model} (${active.currentMileage.toLocaleString()} mi)`,
+    );
+  } else {
+    logger.dim("No active vehicle yet — add one with /vehicles add …");
   }
   logger.dim("Type a question, or /help for session commands.\n");
 
@@ -181,11 +193,8 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/taste edit") {
       const edited = await openInEditor(paths.tasteFile);
-      if (edited == null) {
-        logger.warn("Editor cancelled or failed.");
-      } else {
-        logger.success("taste.md saved from editor.");
-      }
+      if (edited == null) logger.warn("Editor cancelled or failed.");
+      else logger.success("taste.md saved from editor.");
       continue;
     }
 
@@ -200,8 +209,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
         logger.warn("Usage: /forget <preference or skill>");
         continue;
       }
-      const insight = taste.forget(query);
-      logLearning(insight);
+      logLearning(taste.forget(query));
       continue;
     }
 
@@ -215,6 +223,119 @@ async function runChatSession(providerOverride?: string): Promise<void> {
         spinner.stop();
         logger.error(err instanceof Error ? err.message : String(err));
       }
+      continue;
+    }
+
+    if (line === "/active") {
+      const v = vehicles.getActive();
+      console.log(v ? "\n" + vehicles.formatDetail(v) + "\n" : "\nNo active vehicle.\n");
+      continue;
+    }
+
+    if (line === "/history") {
+      const v = vehicles.getActive();
+      if (!v) logger.warn("No active vehicle.");
+      else console.log("\n" + vehicles.formatHistory(v) + "\n");
+      continue;
+    }
+
+    if (line === "/schedule" || line.startsWith("/schedule ")) {
+      const out = await executeTool(
+        "generate_maintenance_schedule",
+        {},
+        { vehicles, taste, paths },
+      );
+      console.log("\n" + out.output + "\n");
+      pending = { response: out.output, userMessage: line };
+      continue;
+    }
+
+    if (line === "/diagnose" || line.startsWith("/diagnose ")) {
+      const symptomsRaw = line.replace(/^\/diagnose\s*/, "").trim();
+      if (!symptomsRaw) {
+        const result = await agent.createPlan(
+          "Run a structured diagnostic session for the active vehicle",
+          "diagnose",
+        );
+        logger.agent(result.response);
+        continue;
+      }
+      const result = await agent.respond(
+        `Diagnose these symptoms: ${symptomsRaw}`,
+        { forcePlan: true, mode: "diagnose" },
+      );
+      logger.agent(result.response);
+      if (result.kind !== "plan") pending = result;
+      continue;
+    }
+
+    if (line === "/parts" || line.startsWith("/parts ")) {
+      const part = line.replace(/^\/parts\s*/, "").trim() || "recommended service parts";
+      const result = await agent.respond(`Research and compare parts options for: ${part}`, {
+        forcePlan: true,
+        mode: "parts",
+      });
+      logger.agent(result.response);
+      if (result.kind !== "plan") pending = result;
+      continue;
+    }
+
+    if (line === "/export" || line.startsWith("/export ")) {
+      const name =
+        line.replace(/^\/export\s*/, "").trim().replace(/[^\w.-]+/g, "-") ||
+        `export-${Date.now()}`;
+      const content = agent.getLastExportable();
+      if (!content) {
+        logger.warn("Nothing to export yet.");
+        continue;
+      }
+      mkdirSync(paths.exports, { recursive: true });
+      const file = join(paths.exports, name.endsWith(".md") ? name : `${name}.md`);
+      writeFileSync(file, content, "utf8");
+      logger.success(`Exported ${file}`);
+      continue;
+    }
+
+    if (line === "/plan" || line.startsWith("/plan ")) {
+      const goal = line.replace(/^\/plan\s*/, "").trim();
+      if (!goal) {
+        logger.warn("Usage: /plan <goal>");
+        continue;
+      }
+      const spinner = ora({ text: "Planning…", color: "cyan" }).start();
+      try {
+        const result = await agent.createPlan(goal, "general");
+        spinner.stop();
+        logger.agent(result.response);
+      } catch (err) {
+        spinner.stop();
+        logger.error(err instanceof Error ? err.message : String(err));
+      }
+      continue;
+    }
+
+    if (line === "/approve") {
+      const spinner = ora({ text: "Executing approved plan…", color: "cyan" }).start();
+      try {
+        const result = await agent.approveAndExecute();
+        spinner.stop();
+        logger.agent(result.response);
+        pending = result;
+      } catch (err) {
+        spinner.stop();
+        logger.error(err instanceof Error ? err.message : String(err));
+      }
+      continue;
+    }
+
+    if (line.startsWith("/revise")) {
+      const feedback = line.replace(/^\/revise\s*/, "").trim();
+      if (!feedback) {
+        logger.warn("Usage: /revise <feedback>");
+        continue;
+      }
+      const result = await agent.revisePending(feedback);
+      logger.agent(result.response);
       continue;
     }
 
@@ -285,7 +406,14 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       continue;
     }
 
-    // Auto-accept previous answer when user moves on with a new question
+    // Pending plan: free-text feedback revises the plan
+    if (agent.getPendingPlan() && !line.startsWith("/")) {
+      const result = await agent.revisePending(line);
+      logger.agent(result.response);
+      continue;
+    }
+
+    // Auto-accept previous answer when user moves on
     if (pending) {
       const { insight } = await taste.record({
         type: "accept",
@@ -303,8 +431,12 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       const result = await agent.respond(line);
       spinner.stop();
       logger.agent(result.response);
-      logger.dim("Signal: Enter//accept · /reject [reason] · /edit");
-      pending = result;
+      if (result.kind === "plan") {
+        logger.dim("Plan ready: /approve · /revise <feedback> · or type feedback");
+      } else {
+        logger.dim("Signal: Enter//accept · /reject [reason] · /edit");
+        pending = result;
+      }
     } catch (err) {
       spinner.stop();
       logger.error(err instanceof Error ? err.message : String(err));
@@ -338,19 +470,24 @@ async function handleVehiclesCommand(
   memory: MemoryStore,
 ): Promise<void> {
   const parts = line.trim().split(/\s+/);
-  if (parts.length === 1) {
+  const cmd = parts[1];
+
+  if (!cmd) {
     console.log("\n" + vehicles.formatList() + "\n");
     return;
   }
 
-  if (parts[1] === "add") {
+  if (cmd === "add") {
     const year = Number(parts[2]);
     const make = parts[3];
     const model = parts[4];
     const mileage = parts[5] != null ? Number(parts[5]) : undefined;
+    const fuelType = (parts[6] as FuelType | undefined) ?? "gas";
 
     if (!year || !make || !model) {
-      logger.warn("Usage: /vehicles add <year> <make> <model> [mileage]");
+      logger.warn(
+        "Usage: /vehicles add <year> <make> <model> [mileage] [gas|diesel|hybrid|ev|other]",
+      );
       return;
     }
 
@@ -358,15 +495,128 @@ async function handleVehiclesCommand(
       year,
       make,
       model,
-      ...(mileage != null && !Number.isNaN(mileage) ? { mileage } : {}),
+      currentMileage: mileage != null && !Number.isNaN(mileage) ? mileage : 0,
+      fuelType: ["gas", "diesel", "hybrid", "ev", "other"].includes(fuelType)
+        ? fuelType
+        : "gas",
     });
-    memory.setVehicleIds([...memory.getSession().vehicleIds, v.id]);
+    memory.setActiveVehicle(v.id);
     memory.addNote(`Added vehicle: ${v.year} ${v.make} ${v.model}`);
-    logger.success(`Added ${v.year} ${v.make} ${v.model}`);
+    logger.success(`Added & activated ${v.year} ${v.make} ${v.model}`);
     return;
   }
 
-  logger.warn("Usage: /vehicles | /vehicles add <year> <make> <model> [mileage]");
+  if (cmd === "switch" || cmd === "use") {
+    const id = parts[2];
+    if (!id) {
+      logger.warn("Usage: /vehicles switch <id>");
+      return;
+    }
+    try {
+      const v = vehicles.setActive(id);
+      if (!v) {
+        logger.warn("Vehicle not found.");
+        return;
+      }
+      memory.setActiveVehicle(v.id);
+      logger.success(`Active: ${v.year} ${v.make} ${v.model}`);
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  if (cmd === "edit") {
+    // /vehicles edit mileage 95000  OR  /vehicles edit notes "text..."
+    const field = parts[2];
+    const value = parts.slice(3).join(" ").replace(/^["']|["']$/g, "");
+    const active = vehicles.getActive();
+    if (!active) {
+      logger.warn("No active vehicle.");
+      return;
+    }
+    if (!field || value === "") {
+      logger.warn(
+        "Usage: /vehicles edit <mileage|notes|engine|trim|fuelType|vin|mod|issue> <value>",
+      );
+      return;
+    }
+    try {
+      let updated;
+      switch (field) {
+        case "mileage":
+        case "currentMileage":
+          updated = vehicles.update(active.id, { currentMileage: Number(value) });
+          break;
+        case "notes":
+          updated = vehicles.update(active.id, { notes: value });
+          break;
+        case "engine":
+          updated = vehicles.update(active.id, { engine: value });
+          break;
+        case "trim":
+          updated = vehicles.update(active.id, { trim: value });
+          break;
+        case "fuelType":
+        case "fuel":
+          updated = vehicles.update(active.id, {
+            fuelType: value as FuelType,
+          });
+          break;
+        case "vin":
+          updated = vehicles.update(active.id, { vin: value });
+          break;
+        case "mod":
+        case "modification":
+          updated = vehicles.update(active.id, {
+            modifications: [...active.modifications, value],
+          });
+          break;
+        case "issue":
+          updated = vehicles.update(active.id, {
+            knownIssues: [...active.knownIssues, value],
+          });
+          break;
+        default:
+          logger.warn(`Unknown field: ${field}`);
+          return;
+      }
+      logger.success("Vehicle updated.");
+      console.log(vehicles.formatDetail(updated));
+    } catch (err) {
+      logger.error(err instanceof Error ? err.message : String(err));
+    }
+    return;
+  }
+
+  if (cmd === "delete" || cmd === "rm") {
+    const id = parts[2] ?? vehicles.getActiveId();
+    if (!id) {
+      logger.warn("Usage: /vehicles delete <id>");
+      return;
+    }
+    const v = vehicles.get(id);
+    if (!v || !vehicles.remove(id)) {
+      logger.warn("Vehicle not found.");
+      return;
+    }
+    const next = vehicles.getActive();
+    memory.setActiveVehicle(next?.id ?? null);
+    logger.success(`Deleted ${v.year} ${v.make} ${v.model}`);
+    return;
+  }
+
+  if (cmd === "show") {
+    const id = parts[2];
+    const v = id ? vehicles.get(id) : vehicles.getActive();
+    if (!v) logger.warn("Vehicle not found.");
+    else console.log("\n" + vehicles.formatDetail(v) + "\n");
+    return;
+  }
+
+  logger.warn(
+    "Usage: /vehicles | add | switch <id> | edit <field> <value> | delete <id> | show [id]",
+  );
 }
 
 async function editInEditor(original: string): Promise<string | null> {

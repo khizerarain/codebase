@@ -78,8 +78,36 @@ export class MemoryStore {
     return [...this.session.messages];
   }
 
+  /**
+   * Context-window management: keep recent turns; summarize older ones into one note.
+   */
+  getMessagesForPrompt(limit = 24): ChatMessage[] {
+    const all = this.session.messages;
+    if (all.length <= limit) return [...all];
+
+    const keep = all.slice(-limit);
+    const dropped = all.slice(0, -limit);
+    const summary = dropped
+      .filter((m) => m.role === "user" || m.role === "assistant")
+      .slice(-8)
+      .map((m) => `${m.role}: ${m.content.replace(/\s+/g, " ").slice(0, 160)}`)
+      .join(" | ");
+
+    return [
+      {
+        role: "assistant",
+        content: `[Earlier conversation summary] ${summary}`,
+      },
+      ...keep,
+    ];
+  }
+
   setVehicleIds(ids: string[]): void {
     this.session.vehicleIds = ids;
+  }
+
+  setActiveVehicle(id: string | null): void {
+    this.session.vehicleIds = id ? [id] : [];
   }
 
   persistSession(): string {

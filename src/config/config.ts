@@ -19,7 +19,8 @@ export const ConfigSchema = z.object({
     })
     .default({}),
   dataDir: z.string().optional(),
-  maxToolRounds: z.number().int().positive().default(5),
+  maxToolRounds: z.number().int().positive().default(8),
+  contextMessageLimit: z.number().int().positive().default(24),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -32,6 +33,8 @@ export interface DataPaths {
   memory: string;
   vehicles: string;
   sessions: string;
+  plans: string;
+  exports: string;
   configFile: string;
   tasteFile: string;
 }
@@ -57,6 +60,8 @@ export function getDataPaths(root?: string): DataPaths {
     memory: join(base, "memory"),
     vehicles: join(base, "vehicles"),
     sessions: join(base, "sessions"),
+    plans: join(base, "plans"),
+    exports: join(base, "exports"),
     configFile: join(base, "config.json"),
     tasteFile: join(base, "taste", "taste.md"),
   };
@@ -72,6 +77,8 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
     paths.memory,
     paths.vehicles,
     paths.sessions,
+    paths.plans,
+    paths.exports,
   ]) {
     mkdirSync(dir, { recursive: true });
   }
