@@ -29,6 +29,25 @@ import {
   handleMemoryCommand,
   handleSkillCommand,
 } from "./cli/phase5.js";
+import {
+  continueDiagnosis,
+  createPhase6,
+  handleDiagnoseCommand,
+  handleDueCommand,
+  handleInspectCommand,
+  handleLogCommand,
+  handlePrepCommand,
+  handleServiceCommand,
+} from "./cli/phase6.js";
+import {
+  handleAttentionCommand,
+  handleBackupCommand,
+  handleDoctorCommand,
+  handleRebuildCommand,
+  handleStatusCommand,
+  handleVerboseToggle,
+} from "./cli/phase7.js";
+import { setVerbose } from "./utils/verbose.js";
 import { exportContent } from "./export/export.js";
 import { GarageService } from "./garage/garage.js";
 import { MemoryStore } from "./memory/memory.js";
@@ -56,7 +75,7 @@ export function buildProgram(): Command {
   program
     .name("codebase")
     .description("Terminal-first AI vehicle agent that learns your taste")
-    .version("0.5.0");
+    .version("0.7.0");
 
   program
     .command("chat", { isDefault: true })
@@ -141,10 +160,15 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
   }
 
+  setVerbose(Boolean(config.verbose));
   const agent = new Agent(config, taste, memory, vehicles, paths);
   const garage = new GarageService(vehicles, taste, paths);
+  const phase6 = createPhase6(paths, taste, agent);
+  let diagnosing = false;
 
-  const active = vehicles.getActive();
+  // Smart default active vehicle when none / invalid pointer
+  const smart = agent.data.ensureSmartActive();
+  const active = smart ?? vehicles.getActive();
   if (active) memory.setActiveVehicle(active.id);
 
   logger.banner();
@@ -317,6 +341,36 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       continue;
     }
 
+    if (line === "/status" || line === "/info") {
+      handleStatusCommand(agent.data);
+      continue;
+    }
+
+    if (line === "/doctor") {
+      handleDoctorCommand(agent.data);
+      continue;
+    }
+
+    if (line === "/backup") {
+      handleBackupCommand(agent.data);
+      continue;
+    }
+
+    if (line === "/rebuild") {
+      handleRebuildCommand(agent.data);
+      continue;
+    }
+
+    if (line === "/attention") {
+      handleAttentionCommand(agent.data);
+      continue;
+    }
+
+    if (line === "/verbose" || line.startsWith("/verbose ")) {
+      handleVerboseToggle(line, agent.data);
+      continue;
+    }
+
     if (line.startsWith("/forget")) {
       const query = line.replace(/^\/forget\s*/, "").trim();
       if (!query) {
@@ -366,21 +420,33 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
 
     if (line === "/diagnose" || line.startsWith("/diagnose ")) {
-      const symptomsRaw = line.replace(/^\/diagnose\s*/, "").trim();
-      if (!symptomsRaw) {
-        const result = await agent.createPlan(
-          "Run a structured diagnostic session for the active vehicle",
-          "diagnose",
-        );
-        logger.agent(result.response);
-        continue;
-      }
-      const result = await agent.respond(
-        `Diagnose these symptoms: ${symptomsRaw}`,
-        { forcePlan: true, mode: "diagnose" },
-      );
-      logger.agent(result.response);
-      if (result.kind !== "plan") pending = result;
+      diagnosing =
+        handleDiagnoseCommand(line, phase6, vehicles, agent) === "collecting";
+      continue;
+    }
+
+    if (line === "/service" || line.startsWith("/service ")) {
+      handleServiceCommand(line, vehicles, taste, agent, paths);
+      continue;
+    }
+
+    if (line === "/prep" || line.startsWith("/prep ")) {
+      handlePrepCommand(line, vehicles, taste, agent);
+      continue;
+    }
+
+    if (line === "/inspect" || line.startsWith("/inspect ")) {
+      handleInspectCommand(line, vehicles, agent);
+      continue;
+    }
+
+    if (line === "/due" || line.startsWith("/due ")) {
+      handleDueCommand(line, vehicles, taste, agent);
+      continue;
+    }
+
+    if (line === "/log" || line.startsWith("/log ")) {
+      handleLogCommand(line, vehicles);
       continue;
     }
 
@@ -525,6 +591,13 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       logger.success("Edit saved.");
       logLearning(insight);
       pending = null;
+      continue;
+    }
+
+    // Active structured diagnosis: free-text answers clarifying questions
+    if (diagnosing && phase6.diagnostics.isCollecting() && !line.startsWith("/")) {
+      diagnosing =
+        continueDiagnosis(line, phase6, vehicles, agent) === "collecting";
       continue;
     }
 

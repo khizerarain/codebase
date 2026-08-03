@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { v4 as uuidv4 } from "uuid";
 import { z } from "zod";
 import { ensureDataDirs, type DataPaths } from "../config/config.js";
+import { scoreRelevance } from "../data/relevance.js";
 
 export const MemoryKindSchema = z.enum(["personal", "vehicle", "context"]);
 export type MemoryKind = z.infer<typeof MemoryKindSchema>;
@@ -16,6 +17,8 @@ export const MemoryFactSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   source: z.enum(["user", "extracted", "system"]).default("user"),
+  pinned: z.boolean().default(false),
+  importance: z.number().min(0).max(1).default(0.5),
 });
 
 export type MemoryFact = z.infer<typeof MemoryFactSchema>;
@@ -58,9 +61,10 @@ export class LongTermMemory {
 
   list(kind?: MemoryKind): MemoryFact[] {
     const facts = this.load().facts;
-    return (kind ? facts.filter((f) => f.kind === kind) : facts).sort((a, b) =>
-      b.updatedAt.localeCompare(a.updatedAt),
-    );
+    return (kind ? facts.filter((f) => f.kind === kind) : facts).sort((a, b) => {
+      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+      return b.updatedAt.localeCompare(a.updatedAt);
+    });
   }
 
   add(input: {
@@ -69,6 +73,8 @@ export class LongTermMemory {
     vehicleIds?: string[];
     tags?: string[];
     source?: MemoryFact["source"];
+    pinned?: boolean;
+    importance?: number;
   }): MemoryFact {
     const now = new Date().toISOString();
     const fact = MemoryFactSchema.parse({
@@ -80,8 +86,15 @@ export class LongTermMemory {
       createdAt: now,
       updatedAt: now,
       source: input.source ?? "user",
+      pinned: input.pinned ?? false,
+      importance: input.importance ?? (input.source === "user" ? 0.7 : 0.5),
     });
     const data = this.load();
+    // Dedup near-identical text
+    const norm = fact.text.toLowerCase();
+    if (data.facts.some((f) => f.text.toLowerCase() === norm)) {
+      return data.facts.find((f) => f.text.toLowerCase() === norm)!;
+    }
     data.facts.push(fact);
     this.save(data);
     return fact;
@@ -94,12 +107,44 @@ export class LongTermMemory {
     data.facts = data.facts.filter(
       (f) => f.id !== idOrText && !f.id.startsWith(idOrText) && !f.text.toLowerCase().includes(needle),
     );
-    // If text match would wipe many, require id-like
     if (before - data.facts.length > 3 && idOrText.length < 8) {
       return false;
     }
     this.save(data);
     return data.facts.length < before;
+  }
+
+  pin(idPrefix: string, pinned = true): MemoryFact | null {
+    const data = this.load();
+    const fact = data.facts.find((f) => f.id.startsWith(idPrefix));
+    if (!fact) return null;
+    fact.pinned = pinned;
+    fact.updatedAt = new Date().toISOString();
+    if (pinned) fact.importance = Math.max(fact.importance, 0.85);
+    this.save(data);
+    return fact;
+  }
+
+  /** Drop lowest-value unpinned facts when over soft cap. */
+  prune(opts: { maxFacts?: number } = {}): number {
+    const max = opts.maxFacts ?? 200;
+    const data = this.load();
+    if (data.facts.length <= max) return 0;
+    const pinned = data.facts.filter((f) => f.pinned);
+    const free = data.facts
+      .filter((f) => !f.pinned)
+      .sort((a, b) => {
+        const sa = a.importance + (a.kind === "context" ? -0.2 : 0);
+        const sb = b.importance + (b.kind === "context" ? -0.2 : 0);
+        if (sa !== sb) return sa - sb;
+        return a.updatedAt.localeCompare(b.updatedAt);
+      });
+    const keepFree = Math.max(0, max - pinned.length);
+    const keptFree = free.slice(-keepFree);
+    const before = data.facts.length;
+    data.facts = [...pinned, ...keptFree];
+    this.save(data);
+    return before - data.facts.length;
   }
 
   formatList(kind?: MemoryKind): string {
@@ -115,30 +160,54 @@ export class LongTermMemory {
           f.kind === "vehicle"
             ? `vehicle:${f.vehicleIds.map((id) => id.slice(0, 8)).join(",") || "?"}`
             : f.kind;
-        return `• [${scope}] ${f.text}\n  id: ${f.id.slice(0, 8)} · ${f.source}`;
+        const pin = f.pinned ? " · PINNED" : "";
+        return `• [${scope}] ${f.text}\n  id: ${f.id.slice(0, 8)} · ${f.source}${pin}`;
       })
       .join("\n");
   }
 
-  /** Compact injection for prompts — never dump everything. */
-  promptSummary(vehicleIds: string[] = [], limit = 10): string {
+  /**
+   * Compact injection for prompts — relevance + pinned first, never dump everything.
+   */
+  promptSummary(
+    vehicleIds: string[] = [],
+    opts: { query?: string; limit?: number } | number = 10,
+  ): string {
+    const limit = typeof opts === "number" ? opts : (opts.limit ?? 10);
+    const query = typeof opts === "number" ? "" : (opts.query ?? "");
     const facts = this.list();
     const vehicleSet = new Set(vehicleIds);
-    const picked = facts
-      .filter((f) => {
-        if (f.kind === "context") return false; // ephemeral-ish; keep out of prompt unless recent
-        if (f.kind === "vehicle") {
-          return f.vehicleIds.some((id) => vehicleSet.has(id));
-        }
-        return true;
-      })
-      .slice(0, limit);
 
-    // Include a couple recent context facts
-    const context = facts.filter((f) => f.kind === "context").slice(0, 2);
-    const all = [...picked, ...context];
+    const eligible = facts.filter((f) => {
+      if (f.kind === "vehicle") {
+        return f.vehicleIds.some((id) => vehicleSet.has(id)) || !f.vehicleIds.length;
+      }
+      return true;
+    });
+
+    const scored = eligible.map((f) => {
+      let score = f.importance + (f.pinned ? 2 : 0);
+      if (f.kind === "personal") score += 0.3;
+      if (f.kind === "context") score -= 0.4;
+      if (query) score += scoreRelevance(query, f.text) * 3;
+      // Recency boost
+      const ageDays =
+        (Date.now() - Date.parse(f.updatedAt)) / (1000 * 60 * 60 * 24);
+      if (ageDays < 14) score += 0.2;
+      return { f, score };
+    });
+
+    scored.sort((a, b) => b.score - a.score);
+    const pinned = scored.filter((x) => x.f.pinned).slice(0, Math.min(4, limit));
+    const rest = scored
+      .filter((x) => !x.f.pinned && (x.f.kind !== "context" || x.score > 0.8))
+      .slice(0, Math.max(0, limit - pinned.length));
+    const all = [...pinned, ...rest].map((x) => x.f);
+
     if (!all.length) return "_No durable memory facts yet._";
-    return all.map((f) => `- (${f.kind}) ${f.text}`).join("\n");
+    return all
+      .map((f) => `- (${f.kind}${f.pinned ? ",pinned" : ""}) ${f.text}`)
+      .join("\n");
   }
 
   proposeExtraction(
@@ -178,6 +247,7 @@ export class LongTermMemory {
       kind: item.kind,
       vehicleIds: item.vehicleIds,
       source: "extracted",
+      importance: 0.65,
     });
   }
 
@@ -197,7 +267,7 @@ export class LongTermMemory {
 
   /**
    * Heuristic high-impact extraction candidates from a user/assistant turn.
-   * Returns proposals the CLI can ask the user to confirm.
+   * Stronger filters to reduce memory bloat.
    */
   suggestFromTurn(userMessage: string, assistantResponse: string, vehicleIds: string[]): string[] {
     const corpus = `${userMessage}\n${assistantResponse}`;
@@ -216,6 +286,14 @@ export class LongTermMemory {
       suggestions.push(`User reported mileage around ${miles[1]} mi`);
     }
 
-    return [...new Set(suggestions)].slice(0, 2);
+    const oil = userMessage.match(
+      /\b(?:i use|prefer|always use)\s+([A-Za-z0-9][\w\s-]{2,40}(?:oil|fluid|coolant))/i,
+    );
+    if (oil) suggestions.push(`Fluid preference: ${oil[0].trim()}`);
+
+    // Skip low-value chatter
+    return [...new Set(suggestions)]
+      .filter((s) => s.length >= 12 && !/\b(hello|thanks|ok)\b/i.test(s))
+      .slice(0, 2);
   }
 }

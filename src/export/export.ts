@@ -9,6 +9,7 @@ export const ExportKindSchema = z.enum([
   "schedule",
   "checklist",
   "diagnosis",
+  "service",
   "last",
   "txt",
 ]);
@@ -23,6 +24,7 @@ export interface ExportBuffers {
   schedule?: string;
   checklist?: string;
   diagnosis?: string;
+  service?: string;
 }
 
 export interface ExportResult {
@@ -42,8 +44,11 @@ export function rememberExport(
   if (/maintenance schedule|due_soon|overdue/.test(h)) {
     buffers.schedule = content;
   }
-  if (/diagnostic|possible causes|symptoms:/.test(h)) {
+  if (/diagnostic|possible causes|symptoms:|diagnostic report/.test(h)) {
     buffers.diagnosis = content;
+  }
+  if (/service plan|procedure outline|job prep/.test(h) || hint === "service") {
+    buffers.service = content;
   }
   if (/\[ \]|checklist|# .*\n\n1\. \[/.test(content) || /checklist/.test(h)) {
     buffers.checklist = content;
@@ -104,6 +109,8 @@ function pickContent(
       return buffers.checklist ?? buffers.last;
     case "diagnosis":
       return buffers.diagnosis ?? buffers.last;
+    case "service":
+      return buffers.service ?? buffers.plan ?? buffers.last;
     case "txt":
       return buffers.last;
     case "last":

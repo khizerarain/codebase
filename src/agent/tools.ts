@@ -13,6 +13,7 @@ import type { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { LongTermMemory } from "../memory/longterm.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
+import { computeMaintenanceItems } from "../workflows/maintenance.js";
 import {
   formatChecklist,
   formatCostBreakdown,
@@ -20,7 +21,6 @@ import {
   formatMaintenanceTable,
   formatPartsComparison,
   type CostLine,
-  type MaintenanceItem,
 } from "./outputs.js";
 import { looksSafetyCritical } from "./safety.js";
 
@@ -575,43 +575,7 @@ export function generateMaintenanceSchedule(
 ): string {
   const v = vehicleId ? ctx.vehicles.get(vehicleId) : ctx.vehicles.getActive();
   if (!v) return "No vehicle available. Add/select one first.";
-
-  const taste = ctx.taste.compactTasteSummary().toLowerCase();
-  const diy = /diy/.test(taste);
-  const preventive = /preventive|preventative/.test(taste);
-  const miles = v.currentMileage;
-
-  const base: Array<Omit<MaintenanceItem, "dueAtMiles" | "status"> & { intervalMiles: number }> = [
-    { item: "Engine oil & filter", intervalMiles: preventive ? 5000 : 7500, notes: diy ? "DIY-friendly" : "Shop ok" },
-    { item: "Cabin air filter", intervalMiles: 15000, notes: "Inspect sooner if dusty" },
-    { item: "Engine air filter", intervalMiles: 20000 },
-    { item: "Brake fluid", intervalMiles: 30000, notes: "Or ~2–3 years" },
-    { item: "Coolant", intervalMiles: v.fuelType === "ev" ? 60000 : 50000 },
-    { item: "Transmission service", intervalMiles: 60000, notes: "Confirm OEM interval" },
-    { item: "Spark plugs", intervalMiles: 60000, notes: v.fuelType === "ev" ? "N/A for EV" : undefined },
-    { item: "Tire rotation", intervalMiles: 7500 },
-    { item: "Brake inspection", intervalMiles: 10000, notes: "Safety-critical" },
-  ].filter((i) => !(v.fuelType === "ev" && i.item === "Spark plugs"));
-
-  const items: MaintenanceItem[] = base.map((b) => {
-    const lastMultiple = Math.floor(miles / b.intervalMiles) * b.intervalMiles;
-    const dueAtMiles = lastMultiple + b.intervalMiles;
-    const remaining = dueAtMiles - miles;
-    let status: MaintenanceItem["status"] = "ok";
-    if (remaining <= 0) status = "overdue";
-    else if (remaining <= Math.min(1500, b.intervalMiles * 0.15)) status = "due_soon";
-    if (dueAtMiles > miles + horizonMiles && status === "ok") {
-      // still show within wider horizon as ok
-    }
-    return {
-      item: b.item,
-      intervalMiles: b.intervalMiles,
-      dueAtMiles,
-      status,
-      notes: b.notes,
-    };
-  });
-
+  const items = computeMaintenanceItems(v, ctx.taste, horizonMiles);
   return formatMaintenanceTable(v, items);
 }
 

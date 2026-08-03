@@ -1,6 +1,7 @@
-import { existsSync, readFileSync } from "node:fs";
 import type { Config } from "../config/config.js";
 import type { DataPaths } from "../config/config.js";
+import { ContextAssembler } from "../data/context.js";
+import { LocalDataStore } from "../data/store.js";
 import {
   rememberExport,
   type ExportBuffers,
@@ -17,6 +18,7 @@ import type { TasteManager } from "../taste/taste.js";
 import { friendlyError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
 import { withRetry } from "../utils/retry.js";
+import { setVerbose, timedAsync, verboseLog } from "../utils/verbose.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
 import { createLLMProvider, type LLMProvider } from "./llm.js";
 import {
@@ -40,6 +42,8 @@ export class Agent {
   readonly plans: PlanStore;
   readonly knowledge: KnowledgeBase;
   readonly longTerm: LongTermMemory;
+  readonly data: LocalDataStore;
+  private readonly context: ContextAssembler;
   private pendingPlan: Plan | null = null;
   private lastExportable = "";
   readonly exports: ExportBuffers = { last: "" };
@@ -57,10 +61,44 @@ export class Agent {
     this.plans = new PlanStore(paths);
     this.knowledge = new KnowledgeBase(paths);
     this.longTerm = new LongTermMemory(paths);
+    setVerbose(Boolean(config.verbose));
+    this.data = new LocalDataStore({
+      paths,
+      config,
+      vehicles,
+      taste,
+      memory,
+      longTerm: this.longTerm,
+      knowledge: this.knowledge,
+      plans: this.plans,
+    });
+    this.context = new ContextAssembler(this.data);
   }
 
   getPendingPlan(): Plan | null {
     return this.pendingPlan;
+  }
+
+  /** Adopt a locally built plan into the Plan → approve → execute loop. */
+  adoptPlan(input: {
+    title: string;
+    goal: string;
+    steps: string[];
+    mode?: Plan["mode"];
+    vehicleId?: string;
+  }): Plan {
+    const plan = this.plans.create({
+      title: input.title,
+      goal: input.goal,
+      steps: input.steps,
+      mode: input.mode ?? "maintenance",
+      vehicleId: input.vehicleId,
+    });
+    this.pendingPlan = plan;
+    const formatted = formatPlanForTerminal(plan);
+    this.setLastExportable(formatted, "plan");
+    this.exports.plan = formatted;
+    return plan;
   }
 
   getLastExportable(): string {
@@ -82,46 +120,8 @@ export class Agent {
     };
   }
 
-  private readGaragePrefs(): string {
-    try {
-      if (!existsSync(this.paths.garagePrefsFile)) {
-        return "_No garage-wide preferences._";
-      }
-      const raw = JSON.parse(
-        readFileSync(this.paths.garagePrefsFile, "utf8"),
-      ) as { notes?: string; preferences?: string[] };
-      const prefs = raw.preferences ?? [];
-      const notes = raw.notes?.trim();
-      if (!prefs.length && !notes) return "_No garage-wide preferences._";
-      return [
-        notes ? `Notes: ${notes}` : null,
-        ...prefs.map((p) => `- ${p}`),
-      ]
-        .filter(Boolean)
-        .join("\n");
-    } catch {
-      return "_No garage-wide preferences._";
-    }
-  }
-
   private promptContext(userMessage: string, mode?: string, approvedPlan?: string) {
-    const active = this.vehicles.getActive();
-    const vehicleIds = active ? [active.id] : this.memory.getSession().vehicleIds;
-    const skills = this.taste.selectRelevantSkills(userMessage, vehicleIds, 4);
-
-    return {
-      tasteSummary: this.taste.compactTasteSummary(),
-      relevantSkills: this.taste.formatSkillsForPrompt(skills),
-      vehiclesSummary: this.vehicles.promptSummary(active?.id),
-      activeVehicle: active
-        ? this.vehicles.formatDetail(active)
-        : "_No active vehicle. Use /vehicles add …_",
-      memoryNotes: this.memory.recentNotesSummary(),
-      longTermMemory: this.longTerm.promptSummary(vehicleIds),
-      garagePrefs: this.readGaragePrefs(),
-      mode,
-      approvedPlan,
-    };
+    return this.context.assemble(userMessage, { mode, approvedPlan });
   }
 
   /** Decide whether to plan first, then either return a plan or answer. */
@@ -290,9 +290,11 @@ export class Agent {
       let llmResponse;
       try {
         logger.dim(`  thinking (round ${round + 1})…`);
-        llmResponse = await withRetry(
-          () => this.llm.chat(messages, TOOL_DEFINITIONS),
-          { retries: this.config.toolRetries, label: "llm" },
+        llmResponse = await timedAsync(`llm.round${round + 1}`, () =>
+          withRetry(
+            () => this.llm.chat(messages, TOOL_DEFINITIONS),
+            { retries: this.config.toolRetries, label: "llm" },
+          ),
         );
       } catch (err) {
         const msg = friendlyError(err);
@@ -320,10 +322,8 @@ export class Agent {
 
         for (const call of llmResponse.toolCalls) {
           logger.tool(call.name, JSON.stringify(call.arguments));
-          let result = await executeTool(
-            call.name,
-            call.arguments,
-            this.toolContext(),
+          let result = await timedAsync(`tool.${call.name}`, () =>
+            executeTool(call.name, call.arguments, this.toolContext()),
           );
           // Retry transient tool failures (tools usually return ok:false, not throw)
           for (
@@ -382,12 +382,16 @@ export class Agent {
     this.memory.addMessage({ role: "assistant", content: finalContent });
     this.memory.persistSession();
 
-    const active = this.vehicles.getActive();
+    const active = this.data.activeVehicle() ?? this.vehicles.getActive();
     const proposals = this.longTerm.suggestFromTurn(
       userMessage,
       finalContent,
       active ? [active.id] : [],
     );
+    // Soft prune after extraction spikes (pinned always kept)
+    this.longTerm.prune({ maxFacts: this.config.maxMemoryFacts });
+    this.data.invalidateCache("taste:");
+    verboseLog(`context cache size=${this.data.cacheSize()}`);
 
     return {
       response: finalContent,

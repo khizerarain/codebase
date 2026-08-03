@@ -156,6 +156,47 @@ export class KnowledgeBase {
   }
 
   /**
+   * Rebuild chunk index from stored doc files; drop entries whose files are gone.
+   */
+  rebuildIndex(): { docs: number; chunks: number; removed: number } {
+    const index = this.loadIndex();
+    const keptDocs: KnowledgeDoc[] = [];
+    const keptChunks: KnowledgeChunk[] = [];
+    let removed = 0;
+
+    for (const doc of index.docs) {
+      if (!existsSync(doc.storedPath)) {
+        removed += 1;
+        continue;
+      }
+      try {
+        const text = extractText(doc.storedPath, doc.kind);
+        if (!text.trim()) {
+          removed += 1;
+          continue;
+        }
+        const chunks = chunkText(text, 900).map((chunk, i) =>
+          KnowledgeChunkSchema.parse({
+            id: `${doc.id}_${i}`,
+            docId: doc.id,
+            title: doc.title,
+            text: chunk,
+            vehicleIds: doc.vehicleIds,
+            index: i,
+          }),
+        );
+        keptDocs.push({ ...doc, chunkCount: chunks.length });
+        keptChunks.push(...chunks);
+      } catch {
+        removed += 1;
+      }
+    }
+
+    this.saveIndex({ docs: keptDocs, chunks: keptChunks });
+    return { docs: keptDocs.length, chunks: keptChunks.length, removed };
+  }
+
+  /**
    * Keyword search over chunks. Returns clearly labeled user-document hits.
    */
   search(

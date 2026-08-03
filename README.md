@@ -2,9 +2,9 @@
 
 **Terminal-first AI vehicle agent** and personal **garage intelligence system** that learns your vehicle taste — how *you* maintain, diagnose, modify, and care for cars, trucks, EVs, and fleets.
 
-Local-first. Private by default. Skills + knowledge + multi-vehicle aware.
+Local-first. Private by default. Skills + knowledge + multi-vehicle + service workflows.
 
-> **Safety:** Decision-support only — not a certified mechanic. See `/safety`.
+> **Safety:** Decision-support only — not a certified mechanic. Diagnoses are ranked hypotheses, never certainty. See `/safety`.
 
 ## Install
 
@@ -25,99 +25,83 @@ $env:CODEBASE_PROVIDER="ollama"
 codebase
 ```
 
-## Quick start
+## Quick start — real workflows
 
 ```text
 /vehicles add 2018 Toyota Tacoma 92000 gas
-/garage
-/skill create OEM Safety :: Prefer OEM on brakes/steering :: Use OEM or OE-quality for safety parts :: oem,safety
-/knowledge add ./my-manual.md active
-/schedule
-/insights
+
+/diagnose squeal when braking in the morning
+cold only, pedal feels firm
+no warning lights
+done
+
+/service front brake pads
+/approve
+
+/log "Front pads + hardware" 92100 140 diy
+/due
+/export diagnosis
 ```
 
-## What’s new in Phase 5
+## Phase 7 — Local data intelligence & performance
 
-### Skills you control
-- Auto-learned skills still appear from Accept/Reject/Edit
-- Create/edit/enable/disable your own Markdown skills
-- Vehicle-specific or global; relevant skills inject into every prompt
+Unified local data layer, relevance-scored context, garage-scale attention, and data health tools — still fully offline.
 
 ```text
-/skill list
-/skill create Winter Prep :: Cold-climate rules :: Use -40 washer fluid | Block heater notes :: climate,winter
-/skill edit winter-prep
-/skill disable budget-conscious
+/status                 System health snapshot
+/doctor                 Broken refs, orphans, schema issues
+/backup                 Timestamped local backup under ~/.codebase/backups
+/rebuild                Rebuild knowledge index + prune memory bloat
+/attention              What needs work across the garage
+/memory pin <id>        Keep high-value facts forever
+/config set verbose true   Timing/debug logs
 ```
 
-### Garage intelligence
-```text
-/garage
-/garage pref Prefer weekend DIY blocks under 3 hours
-/compare <idA> <idB>
-/compare approaches brake job
-/insights
-```
+Context injection now prioritizes the active vehicle, relevant skills, pinned/important memory, related service history, and local knowledge hits — without dumping everything into every prompt. Taste/knowledge snippets are TTL-cached for snappier turns. Large garages get lean vehicle summaries and smarter default active-vehicle selection.
 
-### Local knowledge base
-Ingest manuals, notes, or text-based PDFs. The agent searches them via `search_knowledge` and labels hits as **USER DOCUMENT**.
+## Phase 6 — Service intelligence
 
-```text
-/knowledge add D:\manuals\tacoma-service.md active
-/knowledge search valve clearance
-/knowledge list
-```
+### Structured diagnosis (`/diagnose`)
+1. Enter symptoms  
+2. Answer clarifying questions (or type `done`)  
+3. Get a ranked differential: probability · severity · cost · DIY difficulty  
+4. Clear **Suggestion** vs **Action**, plus safety risk level  
+5. Auto-saved under `exports/` · `/export diagnosis`
 
-### Long-term memory
-Durable facts across sessions (personal / vehicle / one-time context):
+### Service & repair plans (`/service`, `/prep`)
+Full plans include parts (OEM vs aftermarket by taste), tools, procedure outline, time/cost, difficulty, torque notes (from knowledge base when available), and taste reasoning. Ties into Plan → `/approve`.
 
 ```text
-/memory add personal Prefer Motul 5W-30 in winter
-/memory add vehicle Has Bilstein 5100s at stock height
-/memory pending
-/memory confirm
+/service oil change
+/prep spark plugs
+/inspect pre-purchase
 ```
 
-High-impact turns may propose memory facts — confirm or reject explicitly.
+### History & predictions (`/log`, `/due`)
+```text
+/log "Oil + filter" 93000 65 diy
+/due
+/due garage
+/history
+```
 
-## Core loop (still Phase 1–4)
+Due calculations use interval tables **and** your logged service history when descriptions match.
 
-1. Ask or run a command  
-2. Non-trivial work → Plan → `/approve`  
-3. Accept / Reject / Edit → taste + skills learn  
-4. Next session is smarter  
-
-## Command map
+## Earlier capabilities (Phases 1–5)
 
 | Area | Commands |
 |------|----------|
 | Taste | `/accept` `/reject` `/edit` `/taste` `/learn` `/forget` |
-| Skills | `/skill list\|create\|edit\|enable\|disable\|delete` |
-| Garage | `/garage` `/vehicles` `/active` `/compare` `/insights` `/history` |
-| Knowledge | `/knowledge add\|list\|search\|remove` |
-| Memory | `/memory list\|add\|remove\|pending\|confirm\|reject` |
-| Domain | `/schedule` `/diagnose` `/parts` `/plan` `/approve` |
-| System | `/export` `/config` `/safety` `/help` |
+| Skills | `/skill create\|edit\|enable\|disable\|delete` |
+| Garage | `/garage` `/vehicles` `/compare` `/insights` |
+| Knowledge | `/knowledge add\|search\|list` |
+| Memory | `/memory …` |
+| Planning | `/plan` `/approve` `/revise` |
+| Export | `/export plan\|schedule\|checklist\|diagnosis\|service\|last` |
 
 ## Privacy
 
-- No accounts, no cloud sync, no telemetry
-- Data under `~/.codebase/` (or `CODEBASE_HOME`)
-- LLM calls only to the provider you choose
-
-## Data layout
-
-```
-~/.codebase/
-├── config.json
-├── garage-preferences.json
-├── taste/skills/          # learned + user skills
-├── knowledge/             # manuals + index
-├── memory/longterm.json
-├── vehicles/
-├── plans/
-└── exports/
-```
+No accounts, no cloud sync, no telemetry. Data stays in `~/.codebase/` (or `CODEBASE_HOME`).
 
 ## Develop
 
@@ -130,6 +114,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
 
 ## Roadmap
 
-- Phases 1–4 ✅ foundation, taste, agent tools, safety/polish  
-- **Phase 5** ✅ skills, garage, knowledge, long-term memory  
-- Later: OBD/hardware (optional), deeper PDF tooling, export packs  
+- Phases 1–5 ✅ foundation through garage/knowledge  
+- Phase 6 ✅ deep diagnostics + service intelligence  
+- **Phase 7** ✅ local data layer, smarter context, performance & `/doctor`  
+- Later: optional OBD/hardware, richer PDF tooling  

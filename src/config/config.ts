@@ -26,6 +26,12 @@ export const ConfigSchema = z.object({
   exportDir: z.string().optional(),
   defaultVehicleId: z.string().optional(),
   recoverLastSession: z.boolean().default(true),
+  /** Extra timing/debug logs (also CODEBASE_VERBOSE=1). */
+  verbose: z.boolean().default(false),
+  /** Soft cap for long-term memory facts before prune. */
+  maxMemoryFacts: z.number().int().positive().default(200),
+  /** TTL for taste/knowledge context cache (ms). */
+  contextCacheTtlMs: z.number().int().positive().default(30_000),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -230,13 +236,17 @@ export function formatConfigForDisplay(config: Config, paths: DataPaths): string
     `exportDir:          ${config.exportDir ?? paths.exports}`,
     `defaultVehicleId:   ${config.defaultVehicleId ?? "(active vehicle file)"}`,
     `recoverLastSession: ${config.recoverLastSession}`,
+    `verbose:            ${config.verbose}`,
+    `maxMemoryFacts:     ${config.maxMemoryFacts}`,
+    `contextCacheTtlMs:  ${config.contextCacheTtlMs}`,
     `dataDir:            ${paths.root}`,
     `configFile:         ${paths.configFile}`,
     "",
     "Edit: /config set <key> <value>",
     "Keys: provider | openrouter.model | ollama.model | ollama.baseUrl |",
     "      exportFormat | exportDir | defaultVehicleId | toolRetries |",
-    "      maxToolRounds | contextMessageLimit | recoverLastSession",
+    "      maxToolRounds | contextMessageLimit | recoverLastSession |",
+    "      verbose | maxMemoryFacts | contextCacheTtlMs",
   ].join("\n");
 }
 
@@ -285,6 +295,15 @@ export function setConfigValue(
       break;
     case "recoverLastSession":
       next.recoverLastSession = value === "true" || value === "1";
+      break;
+    case "verbose":
+      next.verbose = value === "true" || value === "1";
+      break;
+    case "maxMemoryFacts":
+      next.maxMemoryFacts = Number(value);
+      break;
+    case "contextCacheTtlMs":
+      next.contextCacheTtlMs = Number(value);
       break;
     default:
       throw new Error(`Unknown config key: ${key}`);

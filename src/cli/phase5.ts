@@ -299,6 +299,23 @@ export function handleMemoryCommand(
     return;
   }
 
+  if (cmd === "pin" || cmd === "unpin") {
+    if (!argstr) {
+      logger.warn(`Usage: /memory ${cmd} <id>`);
+      return;
+    }
+    const fact = longTerm.pin(argstr, cmd === "pin");
+    if (!fact) logger.warn("Memory fact not found.");
+    else logger.success(`${cmd === "pin" ? "Pinned" : "Unpinned"}: ${fact.text}`);
+    return;
+  }
+
+  if (cmd === "prune") {
+    const n = longTerm.prune();
+    logger.success(n ? `Pruned ${n} low-value memory fact(s).` : "Nothing to prune.");
+    return;
+  }
+
   if (cmd === "pending") {
     const pending = longTerm.listPending();
     if (!pending.length) {
@@ -332,7 +349,7 @@ export function handleMemoryCommand(
   }
 
   logger.warn(
-    "Usage: /memory list|add|remove|pending|confirm|reject …",
+    "Usage: /memory list|add|remove|pin|unpin|prune|pending|confirm|reject …",
   );
 }
 
