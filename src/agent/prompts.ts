@@ -113,9 +113,17 @@ Service intelligence
   /schedule             Full maintenance schedule table
   /parts [part]         OEM vs aftermarket research
 
+Ownership & reports
+  /ownership [/costs]   Cost/mi, health, predictions (add garage)
+  /health [garage]      Quick ownership health snapshot
+  /report <kind>        health|diagnostic|service|ownership|prepurchase|garage|decision
+  /decide buy|keep|sell Decision support (not advice)
+  /decide compare <a> <b>
+  /mods                 list|enable|disable|show|path|skills
+
 Garage & knowledge
   /garage               Multi-vehicle overview
-  /insights             Upcoming work & garage insights
+  /insights             Upcoming work & ownership-aware insights
   /compare <idA> <idB>  Compare two vehicles
   /compare approaches <topic>
   /skill …              Skills: list|create|edit|enable|disable|delete|show
@@ -136,7 +144,9 @@ Export & settings
   /safety               Safety & limitations
   /onboarding           Show welcome guide again
 
-Session
+Session & about
+  /version              Package version
+  /about                Product summary + privacy/safety
   /clear                Clear conversation (keeps vehicles/taste/memory)
   /help                 This help
   /exit                 Quit
@@ -144,8 +154,8 @@ Session
 Tips
   • Data stays in ~/.codebase — local-first & private
   • Non-trivial work opens Plan → /approve → execute
-  • Teach taste + custom skills; cite your manuals via /knowledge
-  • Pin important memories: /memory pin <id>
+  • Reports → exports/reports/ · mods are declarative (no remote code)
+  • Install issues: docs/troubleshooting.md · outside chat: codebase doctor
 `.trim();
 
 /** Heuristic: non-trivial work should enter planning mode. */

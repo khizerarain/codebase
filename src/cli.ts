@@ -47,9 +47,24 @@ import {
   handleStatusCommand,
   handleVerboseToggle,
 } from "./cli/phase7.js";
+import {
+  createPhase8,
+  handleDecideCommand,
+  handleHealthCommand,
+  handleModsCommand,
+  handleOwnershipCommand,
+  handlePrePurchaseInspect,
+  handleReportCommand,
+  tryModCommand,
+} from "./cli/phase8.js";
+import { printStartupDiagnostics } from "./cli/startup.js";
+import { formatDoctorReport, runDoctor } from "./data/doctor.js";
+import { LocalDataStore } from "./data/store.js";
 import { setVerbose } from "./utils/verbose.js";
 import { exportContent } from "./export/export.js";
 import { GarageService } from "./garage/garage.js";
+import { KnowledgeBase } from "./knowledge/knowledge.js";
+import { LongTermMemory } from "./memory/longterm.js";
 import { MemoryStore } from "./memory/memory.js";
 import {
   markOnboardingComplete,
@@ -57,12 +72,14 @@ import {
   printEmptyGarageHint,
   printOnboarding,
 } from "./onboarding/onboarding.js";
+import { PlanStore } from "./plans/plans.js";
 import type { LearningInsight } from "./taste/schema.js";
 import { TasteManager } from "./taste/taste.js";
 import { friendlyError } from "./utils/errors.js";
 import { logger } from "./utils/logger.js";
 import type { FuelType } from "./vehicles/schema.js";
 import { VehicleStore } from "./vehicles/vehicles.js";
+import { APP_VERSION, formatAbout, formatVersionLine } from "./version.js";
 
 interface PendingAnswer {
   response: string;
@@ -75,7 +92,7 @@ export function buildProgram(): Command {
   program
     .name("codebase")
     .description("Terminal-first AI vehicle agent that learns your taste")
-    .version("0.7.0");
+    .version(APP_VERSION);
 
   program
     .command("chat", { isDefault: true })
@@ -83,6 +100,43 @@ export function buildProgram(): Command {
     .option("--provider <provider>", "openrouter | ollama")
     .action(async (opts: { provider?: string }) => {
       await runChatSession(opts.provider);
+    });
+
+  program
+    .command("version")
+    .description("Print version")
+    .action(() => {
+      console.log(formatVersionLine());
+    });
+
+  program
+    .command("about")
+    .description("Product summary, privacy, and safety pointers")
+    .action(() => {
+      console.log(formatAbout());
+    });
+
+  program
+    .command("doctor")
+    .description("Check local data health and basic install readiness")
+    .action(() => {
+      const paths = ensureDataDirs();
+      const config = loadConfig(paths);
+      printStartupDiagnostics(paths, config, { verbose: true });
+      const taste = new TasteManager(paths);
+      const vehicles = new VehicleStore(paths);
+      const memory = new MemoryStore(paths, false);
+      const data = new LocalDataStore({
+        paths,
+        config,
+        vehicles,
+        taste,
+        memory,
+        longTerm: new LongTermMemory(paths),
+        knowledge: new KnowledgeBase(paths),
+        plans: new PlanStore(paths),
+      });
+      console.log("\n" + formatDoctorReport(runDoctor(data)) + "\n");
     });
 
   program
@@ -164,6 +218,8 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   const agent = new Agent(config, taste, memory, vehicles, paths);
   const garage = new GarageService(vehicles, taste, paths);
   const phase6 = createPhase6(paths, taste, agent);
+  const phase8 = createPhase8(paths, vehicles, taste, agent, garage);
+  agent.setMods(phase8.mods);
   let diagnosing = false;
 
   // Smart default active vehicle when none / invalid pointer
@@ -172,6 +228,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   if (active) memory.setActiveVehicle(active.id);
 
   logger.banner();
+  printStartupDiagnostics(paths, config, { verbose: Boolean(config.verbose) });
 
   const firstTime = needsOnboarding(paths, vehicles);
   if (firstTime) {
@@ -195,9 +252,6 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   logger.info(`Provider: ${config.provider}`);
   if (config.provider === "openrouter") {
     logger.dim(`  model: ${config.openrouter.model}`);
-    if (!config.openrouter.apiKey) {
-      logger.warn("OPENROUTER_API_KEY not set — set it or use --provider ollama");
-    }
   } else {
     logger.dim(`  model: ${config.ollama.model} @ ${config.ollama.baseUrl}`);
   }
@@ -208,7 +262,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   } else {
     logger.dim("No active vehicle yet — add one with /vehicles add …");
   }
-  logger.dim("Type a question, or /help · /safety for guidance.\n");
+  logger.dim("Type a question, or /help · /about · /safety for guidance.\n");
 
   const rl = readline.createInterface({ input, output, terminal: true });
   let pending: PendingAnswer | null = null;
@@ -267,6 +321,16 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/help") {
       console.log("\n" + SESSION_HELP + "\n");
+      continue;
+    }
+
+    if (line === "/version") {
+      console.log("\n" + formatVersionLine() + "\n");
+      continue;
+    }
+
+    if (line === "/about") {
+      console.log("\n" + formatAbout() + "\n");
       continue;
     }
 
@@ -436,7 +500,39 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
 
     if (line === "/inspect" || line.startsWith("/inspect ")) {
-      handleInspectCommand(line, vehicles, agent);
+      handleInspectCommand(line, vehicles, agent, () =>
+        handlePrePurchaseInspect(phase8),
+      );
+      continue;
+    }
+
+    if (line === "/report" || line.startsWith("/report ")) {
+      handleReportCommand(line, phase8);
+      continue;
+    }
+
+    if (
+      line === "/ownership" ||
+      line.startsWith("/ownership ") ||
+      line === "/costs" ||
+      line.startsWith("/costs ")
+    ) {
+      handleOwnershipCommand(line, phase8);
+      continue;
+    }
+
+    if (line === "/health" || line.startsWith("/health ")) {
+      handleHealthCommand(line, phase8);
+      continue;
+    }
+
+    if (line === "/mods" || line.startsWith("/mods ")) {
+      handleModsCommand(line, phase8);
+      continue;
+    }
+
+    if (line === "/decide" || line.startsWith("/decide ")) {
+      handleDecideCommand(line, phase8);
       continue;
     }
 
@@ -591,6 +687,11 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       logger.success("Edit saved.");
       logLearning(insight);
       pending = null;
+      continue;
+    }
+
+    // Declarative mod slash commands (local JSON/Markdown only)
+    if (line.startsWith("/") && tryModCommand(line, phase8)) {
       continue;
     }
 

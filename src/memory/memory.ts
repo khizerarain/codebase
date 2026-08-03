@@ -137,26 +137,37 @@ export class MemoryStore {
 
   /**
    * Context-window management: keep recent turns; summarize older ones into one note.
+   * Truncates bulky tool payloads so long sessions stay usable.
    */
   getMessagesForPrompt(limit = 24): ChatMessage[] {
     const all = this.session.messages;
-    if (all.length <= limit) return [...all];
+    const compact = (msgs: ChatMessage[]): ChatMessage[] =>
+      msgs.map((m) => {
+        if (m.role !== "tool" && m.role !== "assistant") return m;
+        if (m.content.length <= 1600) return m;
+        return {
+          ...m,
+          content: `${m.content.slice(0, 1600)}…[truncated for context window]`,
+        };
+      });
+
+    if (all.length <= limit) return compact([...all]);
 
     const keep = all.slice(-limit);
     const dropped = all.slice(0, -limit);
     const summary = dropped
       .filter((m) => m.role === "user" || m.role === "assistant")
       .slice(-8)
-      .map((m) => `${m.role}: ${m.content.replace(/\s+/g, " ").slice(0, 160)}`)
+      .map((m) => `${m.role}: ${m.content.replace(/\s+/g, " ").slice(0, 120)}`)
       .join(" | ");
 
-    return [
+    return compact([
       {
         role: "assistant",
         content: `[Earlier conversation summary] ${summary}`,
       },
       ...keep,
-    ];
+    ]);
   }
 
   setVehicleIds(ids: string[]): void {

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Safety & limitations
+    url: https://github.com/khizerarain/codebase/blob/main/docs/safety.md
+    about: Read before filing diagnosis/accuracy complaints
+  - name: Install & troubleshooting
+    url: https://github.com/khizerarain/codebase/blob/main/docs/troubleshooting.md
+    about: Common install/run fixes

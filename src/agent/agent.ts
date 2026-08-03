@@ -2,6 +2,7 @@ import type { Config } from "../config/config.js";
 import type { DataPaths } from "../config/config.js";
 import { ContextAssembler } from "../data/context.js";
 import { LocalDataStore } from "../data/store.js";
+import { scoreRelevance } from "../data/relevance.js";
 import {
   rememberExport,
   type ExportBuffers,
@@ -9,6 +10,7 @@ import {
 import { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { MemoryStore } from "../memory/memory.js";
 import { LongTermMemory } from "../memory/longterm.js";
+import type { ModRegistry } from "../mods/registry.js";
 import {
   formatPlanForTerminal,
   PlanStore,
@@ -44,6 +46,7 @@ export class Agent {
   readonly longTerm: LongTermMemory;
   readonly data: LocalDataStore;
   private readonly context: ContextAssembler;
+  private mods: ModRegistry | null = null;
   private pendingPlan: Plan | null = null;
   private lastExportable = "";
   readonly exports: ExportBuffers = { last: "" };
@@ -73,6 +76,11 @@ export class Agent {
       plans: this.plans,
     });
     this.context = new ContextAssembler(this.data);
+  }
+
+  /** Attach local mods registry (Phase 8) for skill/tool overlays. */
+  setMods(mods: ModRegistry | null): void {
+    this.mods = mods;
   }
 
   getPendingPlan(): Plan | null {
@@ -117,11 +125,33 @@ export class Agent {
       paths: this.paths,
       knowledge: this.knowledge,
       longTerm: this.longTerm,
+      mods: this.mods ?? undefined,
     };
   }
 
   private promptContext(userMessage: string, mode?: string, approvedPlan?: string) {
-    return this.context.assemble(userMessage, { mode, approvedPlan });
+    const assembled = this.context.assemble(userMessage, { mode, approvedPlan });
+    if (!this.mods) return assembled;
+    const modSkills = this.mods
+      .enabledSkills()
+      .filter((s) => s.enabled)
+      .map((s) => ({
+        s,
+        score: scoreRelevance(
+          userMessage,
+          `${s.name} ${s.description} ${s.whenToApply} ${s.rules.join(" ")}`,
+        ),
+      }))
+      .filter((x) => x.score >= 0.05)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 2)
+      .map((x) => x.s);
+    if (!modSkills.length) return assembled;
+    const extra = this.taste.formatSkillsForPrompt(modSkills);
+    return {
+      ...assembled,
+      relevantSkills: `${assembled.relevantSkills.trim()}\n\n### Mod skills\n${extra}`.trim(),
+    };
   }
 
   /** Decide whether to plan first, then either return a plan or answer. */
@@ -299,9 +329,24 @@ export class Agent {
       } catch (err) {
         const msg = friendlyError(err);
         logger.error(msg);
-        finalContent =
-          "I hit an LLM provider error. Check `/config` (OpenRouter key or Ollama).\n\n" +
-          msg;
+        // Persist partial session so Ctrl+C / provider blips don't lose the turn trail
+        try {
+          this.memory.persistSession();
+        } catch {
+          // ignore
+        }
+        finalContent = [
+          "I hit an LLM provider error — your session was saved.",
+          "",
+          msg,
+          "",
+          "Try:",
+          "• `/config` — confirm provider / model",
+          "• OpenRouter: set OPENROUTER_API_KEY",
+          "• Ollama: ensure it is running, or `/config set provider ollama`",
+          "• `/clear` if the recovered session is noisy, then ask again",
+          "• Outside chat: `codebase doctor`",
+        ].join("\n");
         break;
       }
 

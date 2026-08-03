@@ -1,5 +1,6 @@
 import { generateMaintenanceSchedule } from "../agent/tools.js";
 import type { DataPaths } from "../config/config.js";
+import { OwnershipEngine } from "../ownership/engine.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { Vehicle, VehicleStore } from "../vehicles/vehicles.js";
 
@@ -88,6 +89,9 @@ export class GarageService {
     const list = this.vehicles.list();
     if (!list.length) return "No vehicles in the garage yet.";
 
+    const ownership = new OwnershipEngine(this.vehicles, this.taste);
+    const overview = ownership.garageOverview();
+
     const ctx = {
       vehicles: this.vehicles,
       taste: this.taste,
@@ -107,7 +111,6 @@ export class GarageService {
         const status = m[2] ?? "";
         if (item) upcoming.push(`• ${label(v)} — ${item} (${status})`);
       }
-      // Rough heuristic cost band per due item
       const dueCount = due.length;
       roughCostLow += dueCount * 40;
       roughCostHigh += dueCount * 220;
@@ -124,16 +127,17 @@ export class GarageService {
       .map(([k, n]) => `• ${k} (×${n})`);
 
     const historyTotal = list.reduce((n, v) => n + v.serviceHistory.length, 0);
-    const spent = list
-      .flatMap((v) => v.serviceHistory)
-      .reduce((n, r) => n + (r.cost ?? 0), 0);
 
     return [
       "Garage insights",
       "───────────────",
       `Vehicles: ${list.length}`,
       `Service records logged: ${historyTotal}`,
-      `Recorded spend (from history): $${spent.toFixed(0)}`,
+      `Recorded spend (from history): $${overview.totalLoggedSpend.toFixed(0)}`,
+      `Avg cost/mi: ${overview.avgCostPerMile != null ? `$${overview.avgCostPerMile.toFixed(3)}` : "n/a"}`,
+      "",
+      "Ownership health focus:",
+      ...overview.focus.map((f) => `• ${f}`),
       "",
       "Upcoming / attention items (next ~10k mi horizon):",
       ...(upcoming.length ? upcoming.slice(0, 12) : ["• None flagged from local schedule heuristics"]),
@@ -143,7 +147,7 @@ export class GarageService {
       "Common known issues across garage:",
       ...(commonIssues.length ? commonIssues : ["• None logged yet"]),
       "",
-      "Tip: run /schedule on the active vehicle for a full table. Taste still shapes DIY vs shop bias.",
+      "Tip: /ownership garage · /health garage · /report garage · /due garage",
     ].join("\n");
   }
 

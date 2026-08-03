@@ -136,9 +136,14 @@ export function handleInspectCommand(
   line: string,
   vehicles: VehicleStore,
   agent: Agent,
+  onPrePurchase?: () => void,
 ): void {
   const arg = line.replace(/^\/inspect\s*/, "").trim().toLowerCase();
   const kind = arg.includes("pre") || arg.includes("purchase") ? "pre-purchase" : "periodic";
+  if (kind === "pre-purchase" && onPrePurchase) {
+    onPrePurchase();
+    return;
+  }
   const md = buildInspectionChecklist(kind, vehicles.getActive());
   agent.setLastExportable(md, "checklist");
   logger.agent(md);

@@ -83,7 +83,9 @@ export function printOnboarding(vehiclesEmpty: boolean): void {
   console.log();
   console.log(chalk.white("  Useful commands"));
   console.log(
-    chalk.dim("  /help  /safety  /plan  /diagnose  /parts  /export plan  /config  /taste"),
+    chalk.dim(
+      "  /help  /about  /safety  /diagnose  /service  /ownership  /report  /config",
+    ),
   );
   console.log();
   console.log(

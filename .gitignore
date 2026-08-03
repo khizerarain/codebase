@@ -1,16 +1,39 @@
+# Dependencies & build
 node_modules/
 dist/
-.codebase/
-*.log
-.env
-.env.local
-.DS_Store
-coverage/
 *.tsbuildinfo
-.pnpm-debug.log*
 .pnpm-store/
+.pnpm-debug.log*
+
+# Local / user data (never commit)
+.codebase/
+**/.codebase/
+*.log
+
+# Secrets & env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials.json
+secrets.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
 .vs/
 .vscode/
 .idea/
 *.swp
 *.swo
+*~
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Misc
+tmp/
+temp/
+*.tgz

@@ -46,7 +46,9 @@ export interface DataPaths {
   sessions: string;
   plans: string;
   exports: string;
+  reports: string;
   knowledge: string;
+  mods: string;
   configFile: string;
   tasteFile: string;
   garagePrefsFile: string;
@@ -75,7 +77,12 @@ export function getDataPaths(root?: string, exportDirOverride?: string): DataPat
     sessions: join(base, "sessions"),
     plans: join(base, "plans"),
     exports: exportDirOverride ? exportDirOverride : join(base, "exports"),
+    reports: join(
+      exportDirOverride ? exportDirOverride : join(base, "exports"),
+      "reports",
+    ),
     knowledge: join(base, "knowledge"),
+    mods: join(base, "mods"),
     configFile: join(base, "config.json"),
     tasteFile: join(base, "taste", "taste.md"),
     garagePrefsFile: join(base, "garage-preferences.json"),
@@ -94,10 +101,27 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
     paths.sessions,
     paths.plans,
     paths.exports,
+    paths.reports,
     paths.knowledge,
     join(paths.knowledge, "docs"),
+    paths.mods,
   ]) {
     mkdirSync(dir, { recursive: true });
+  }
+
+  const modsReadme = join(paths.mods, "README.md");
+  if (!existsSync(modsReadme)) {
+    writeFileSync(
+      modsReadme,
+      [
+        "# Local mods",
+        "",
+        "Drop a folder here with `mod.json` to extend Codebase locally.",
+        "See project README → Phase 8 mods. No remote marketplace; no code execution.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
   }
 
   if (!existsSync(paths.garagePrefsFile)) {

@@ -11,6 +11,8 @@ import { z } from "zod";
 import type { DataPaths } from "../config/config.js";
 import type { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { LongTermMemory } from "../memory/longterm.js";
+import type { ModRegistry } from "../mods/registry.js";
+import { OwnershipEngine } from "../ownership/engine.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
 import { computeMaintenanceItems } from "../workflows/maintenance.js";
@@ -42,6 +44,7 @@ export interface ToolContext {
   paths: DataPaths;
   knowledge?: KnowledgeBase;
   longTerm?: LongTermMemory;
+  mods?: ModRegistry;
 }
 
 const SearchWebSchema = z.object({ query: z.string().min(1) });
@@ -280,6 +283,30 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ["query"],
     },
   },
+  {
+    name: "ownership_insights",
+    description:
+      "Local ownership health, cost/mi, reliability, and due predictions for a vehicle or the garage.",
+    parameters: {
+      type: "object",
+      properties: {
+        garage: { type: "boolean" },
+        vehicleId: { type: "string" },
+      },
+    },
+  },
+  {
+    name: "mod_lookup",
+    description:
+      "Look up a declarative local mod tool by name (Markdown/JSON only — no remote code).",
+    parameters: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
 ];
 
 export async function executeTool(
@@ -372,6 +399,45 @@ export async function executeTool(
           ok: true,
           output: ctx.knowledge.search(data.query, { vehicleIds }),
         };
+      }
+      case "ownership_insights": {
+        const garage = Boolean(args.garage);
+        const vehicleId =
+          typeof args.vehicleId === "string" ? args.vehicleId : undefined;
+        const engine = new OwnershipEngine(ctx.vehicles, ctx.taste);
+        if (garage) {
+          return {
+            name,
+            ok: true,
+            output: engine.formatGarageReport(engine.garageOverview()),
+          };
+        }
+        const v = vehicleId
+          ? ctx.vehicles.get(vehicleId)
+          : ctx.vehicles.getActive();
+        if (!v) {
+          return { name, ok: false, output: "No vehicle found for ownership insights." };
+        }
+        return {
+          name,
+          ok: true,
+          output: engine.formatVehicleReport(engine.analyzeVehicle(v)),
+        };
+      }
+      case "mod_lookup": {
+        const toolName = z.object({ name: z.string().min(1) }).parse(args).name;
+        if (!ctx.mods) {
+          return { name, ok: false, output: "Mods registry not available." };
+        }
+        const out = ctx.mods.lookupTool(toolName);
+        if (!out) {
+          return {
+            name,
+            ok: false,
+            output: `No enabled mod tool named "${toolName}". Use /mods list.`,
+          };
+        }
+        return { name, ok: true, output: out };
       }
       default:
         return { name, ok: false, output: `Unknown tool: ${name}` };

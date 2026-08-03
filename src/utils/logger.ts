@@ -56,7 +56,7 @@ export const logger = {
       chalk.dim("— terminal-first AI vehicle agent"),
     );
     console.log(
-      chalk.dim("  Taste-aware · local-first · private · type /help"),
+      chalk.dim("  Taste-aware · local-first · private · /help · /about"),
     );
     console.log();
   },
