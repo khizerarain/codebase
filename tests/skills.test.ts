@@ -15,6 +15,8 @@ describe("skill markdown roundtrip", () => {
       vehicleIds: [],
       tags: ["budget", "value"],
       evidenceCount: 3,
+      enabled: true,
+      source: "user",
       createdAt: "2026-01-01T00:00:00.000Z",
       lastUpdated: "2026-01-02T00:00:00.000Z",
     };

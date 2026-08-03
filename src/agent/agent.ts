@@ -1,14 +1,23 @@
+import { existsSync, readFileSync } from "node:fs";
 import type { Config } from "../config/config.js";
 import type { DataPaths } from "../config/config.js";
+import {
+  rememberExport,
+  type ExportBuffers,
+} from "../export/export.js";
+import { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { MemoryStore } from "../memory/memory.js";
+import { LongTermMemory } from "../memory/longterm.js";
 import {
   formatPlanForTerminal,
   PlanStore,
   type Plan,
 } from "../plans/plans.js";
 import type { TasteManager } from "../taste/taste.js";
-import type { VehicleStore } from "../vehicles/vehicles.js";
+import { friendlyError } from "../utils/errors.js";
 import { logger } from "../utils/logger.js";
+import { withRetry } from "../utils/retry.js";
+import type { VehicleStore } from "../vehicles/vehicles.js";
 import { createLLMProvider, type LLMProvider } from "./llm.js";
 import {
   buildPlanPrompt,
@@ -23,13 +32,17 @@ export interface AgentTurnResult {
   userMessage: string;
   kind?: "answer" | "plan" | "clarification";
   plan?: Plan;
+  memoryProposals?: string[];
 }
 
 export class Agent {
   readonly llm: LLMProvider;
   readonly plans: PlanStore;
+  readonly knowledge: KnowledgeBase;
+  readonly longTerm: LongTermMemory;
   private pendingPlan: Plan | null = null;
   private lastExportable = "";
+  readonly exports: ExportBuffers = { last: "" };
 
   constructor(
     private readonly config: Config,
@@ -42,6 +55,8 @@ export class Agent {
     this.llm = llm ?? createLLMProvider(config);
     this.taste.setLLM(this.llm);
     this.plans = new PlanStore(paths);
+    this.knowledge = new KnowledgeBase(paths);
+    this.longTerm = new LongTermMemory(paths);
   }
 
   getPendingPlan(): Plan | null {
@@ -52,12 +67,41 @@ export class Agent {
     return this.lastExportable;
   }
 
+  setLastExportable(content: string, hint?: string): void {
+    this.lastExportable = content;
+    rememberExport(this.exports, content, hint);
+  }
+
   private toolContext(): ToolContext {
     return {
       vehicles: this.vehicles,
       taste: this.taste,
       paths: this.paths,
+      knowledge: this.knowledge,
+      longTerm: this.longTerm,
     };
+  }
+
+  private readGaragePrefs(): string {
+    try {
+      if (!existsSync(this.paths.garagePrefsFile)) {
+        return "_No garage-wide preferences._";
+      }
+      const raw = JSON.parse(
+        readFileSync(this.paths.garagePrefsFile, "utf8"),
+      ) as { notes?: string; preferences?: string[] };
+      const prefs = raw.preferences ?? [];
+      const notes = raw.notes?.trim();
+      if (!prefs.length && !notes) return "_No garage-wide preferences._";
+      return [
+        notes ? `Notes: ${notes}` : null,
+        ...prefs.map((p) => `- ${p}`),
+      ]
+        .filter(Boolean)
+        .join("\n");
+    } catch {
+      return "_No garage-wide preferences._";
+    }
   }
 
   private promptContext(userMessage: string, mode?: string, approvedPlan?: string) {
@@ -73,6 +117,8 @@ export class Agent {
         ? this.vehicles.formatDetail(active)
         : "_No active vehicle. Use /vehicles add …_",
       memoryNotes: this.memory.recentNotesSummary(),
+      longTermMemory: this.longTerm.promptSummary(vehicleIds),
+      garagePrefs: this.readGaragePrefs(),
       mode,
       approvedPlan,
     };
@@ -102,19 +148,21 @@ export class Agent {
     let steps: string[] = [];
 
     try {
-      const res = await this.llm.chat([
-        { role: "system", content: buildPlanPrompt(goal, ctx) },
-        { role: "user", content: goal },
-      ]);
+      const res = await withRetry(
+        () =>
+          this.llm.chat([
+            { role: "system", content: buildPlanPrompt(goal, ctx) },
+            { role: "user", content: goal },
+          ]),
+        { retries: this.config.toolRetries, label: "plan-llm" },
+      );
       const parsed = extractPlanJson(res.content);
       if (parsed) {
         title = parsed.title || title;
         steps = parsed.steps;
       }
     } catch (err) {
-      logger.warn(
-        `Plan LLM failed (${err instanceof Error ? err.message : String(err)}); using fallback plan.`,
-      );
+      logger.warn(`Plan LLM failed (${friendlyError(err)}); using fallback plan.`);
     }
 
     if (!steps.length) {
@@ -129,10 +177,12 @@ export class Agent {
       mode,
     });
     this.pendingPlan = plan;
-    this.lastExportable = formatPlanForTerminal(plan);
+    const formatted = formatPlanForTerminal(plan);
+    this.setLastExportable(formatted, "plan");
+    this.exports.plan = formatted;
 
     const response = [
-      formatPlanForTerminal(plan),
+      formatted,
       "",
       `Saved: ${this.plans.markdownPath(plan.id)}`,
     ].join("\n");
@@ -179,8 +229,9 @@ export class Agent {
 
     const plan = this.plans.revise(this.pendingPlan.id, feedback, newSteps);
     this.pendingPlan = plan;
-    this.lastExportable = formatPlanForTerminal(plan);
     const response = formatPlanForTerminal(plan);
+    this.setLastExportable(response, "plan");
+    this.exports.plan = response;
     return { response, userMessage: feedback, kind: "plan", plan };
   }
 
@@ -208,7 +259,7 @@ export class Agent {
 
     const done = this.plans.markDone(plan.id, result.response);
     this.pendingPlan = null;
-    this.lastExportable = result.response;
+    this.setLastExportable(result.response, plan.mode);
 
     return {
       ...result,
@@ -239,12 +290,15 @@ export class Agent {
       let llmResponse;
       try {
         logger.dim(`  thinking (round ${round + 1})…`);
-        llmResponse = await this.llm.chat(messages, TOOL_DEFINITIONS);
+        llmResponse = await withRetry(
+          () => this.llm.chat(messages, TOOL_DEFINITIONS),
+          { retries: this.config.toolRetries, label: "llm" },
+        );
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = friendlyError(err);
         logger.error(msg);
         finalContent =
-          "I hit an LLM provider error. Check your provider config (OpenRouter key or Ollama).\n\n" +
+          "I hit an LLM provider error. Check `/config` (OpenRouter key or Ollama).\n\n" +
           msg;
         break;
       }
@@ -266,7 +320,26 @@ export class Agent {
 
         for (const call of llmResponse.toolCalls) {
           logger.tool(call.name, JSON.stringify(call.arguments));
-          const result = await executeTool(call.name, call.arguments, this.toolContext());
+          let result = await executeTool(
+            call.name,
+            call.arguments,
+            this.toolContext(),
+          );
+          // Retry transient tool failures (tools usually return ok:false, not throw)
+          for (
+            let attempt = 0;
+            attempt < this.config.toolRetries &&
+            !result.ok &&
+            /timeout|ECONNRESET|fetch failed|429|502|503/i.test(result.output);
+            attempt++
+          ) {
+            logger.dim(`  retrying ${call.name} (${attempt + 1})…`);
+            result = await executeTool(
+              call.name,
+              call.arguments,
+              this.toolContext(),
+            );
+          }
           const observation = result.ok
             ? result.output
             : `Tool error: ${result.output}`;
@@ -304,12 +377,24 @@ export class Agent {
       }
     }
 
-    finalContent = withSafetyFooter(finalContent);
-    this.lastExportable = finalContent;
+    finalContent = withSafetyFooter(finalContent, `${userMessage}\n${opts.mode ?? ""}`);
+    this.setLastExportable(finalContent, opts.mode ?? userMessage);
     this.memory.addMessage({ role: "assistant", content: finalContent });
     this.memory.persistSession();
 
-    return { response: finalContent, userMessage, kind: "answer" };
+    const active = this.vehicles.getActive();
+    const proposals = this.longTerm.suggestFromTurn(
+      userMessage,
+      finalContent,
+      active ? [active.id] : [],
+    );
+
+    return {
+      response: finalContent,
+      userMessage,
+      kind: "answer",
+      memoryProposals: proposals,
+    };
   }
 }
 

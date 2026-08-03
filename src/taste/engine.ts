@@ -393,6 +393,9 @@ export class TasteEngine {
       vehicleIds: pref.vehicleIds ?? [],
       tags: uniq([...hit.tags, ...pref.tags]),
       evidenceCount: pref.evidenceCount,
+      enabled: existing?.enabled ?? true,
+      source: existing?.source ?? "learned",
+      lastUsed: existing?.lastUsed,
       createdAt: existing?.createdAt ?? now,
       lastUpdated: now,
     });

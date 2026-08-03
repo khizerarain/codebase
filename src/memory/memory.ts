@@ -40,13 +40,22 @@ export class MemoryStore {
   private readonly paths: DataPaths;
   private session: Session;
 
-  constructor(paths: DataPaths = ensureDataDirs()) {
+  constructor(paths: DataPaths = ensureDataDirs(), recover = false) {
     this.paths = paths;
-    this.session = this.createSession();
+    if (recover) {
+      const recovered = this.tryRecoverLatest();
+      this.session = recovered ?? this.createSession();
+    } else {
+      this.session = this.createSession();
+    }
   }
 
   private memoryFile(): string {
     return join(this.paths.memory, "notes.json");
+  }
+
+  private currentPointerFile(): string {
+    return join(this.paths.sessions, "_current.json");
   }
 
   createSession(vehicleIds: string[] = []): Session {
@@ -58,7 +67,55 @@ export class MemoryStore {
       messages: [],
       vehicleIds,
     };
+    this.writeCurrentPointer();
     return this.session;
+  }
+
+  /** Recover the most recent non-empty session after a crash/restart. */
+  tryRecoverLatest(): Session | null {
+    const recent = this.listRecentSessions(1)[0];
+    if (!recent || recent.messages.length === 0) return null;
+    // Prefer pointer if valid
+    const pointer = this.readCurrentPointer();
+    if (pointer) {
+      const pointed = this.loadSessionById(pointer);
+      if (pointed && pointed.messages.length > 0) {
+        this.session = pointed;
+        return pointed;
+      }
+    }
+    this.session = recent;
+    this.writeCurrentPointer();
+    return recent;
+  }
+
+  private readCurrentPointer(): string | null {
+    const file = this.currentPointerFile();
+    if (!existsSync(file)) return null;
+    try {
+      const raw = JSON.parse(readFileSync(file, "utf8")) as { id?: string };
+      return raw.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeCurrentPointer(): void {
+    writeFileSync(
+      this.currentPointerFile(),
+      JSON.stringify({ id: this.session.id, updatedAt: this.session.updatedAt }, null, 2),
+      "utf8",
+    );
+  }
+
+  loadSessionById(id: string): Session | null {
+    const file = join(this.paths.sessions, `${id}.json`);
+    if (!existsSync(file)) return null;
+    try {
+      return SessionSchema.parse(JSON.parse(readFileSync(file, "utf8")) as unknown);
+    } catch {
+      return null;
+    }
   }
 
   getSession(): Session {
@@ -113,6 +170,7 @@ export class MemoryStore {
   persistSession(): string {
     const file = join(this.paths.sessions, `${this.session.id}.json`);
     writeFileSync(file, JSON.stringify(this.session, null, 2), "utf8");
+    this.writeCurrentPointer();
     return file;
   }
 
@@ -150,7 +208,7 @@ export class MemoryStore {
   listRecentSessions(limit = 5): Session[] {
     if (!existsSync(this.paths.sessions)) return [];
     return readdirSync(this.paths.sessions)
-      .filter((f) => f.endsWith(".json"))
+      .filter((f) => f.endsWith(".json") && !f.startsWith("_"))
       .map((f) => {
         try {
           return SessionSchema.parse(

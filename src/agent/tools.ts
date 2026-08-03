@@ -9,6 +9,8 @@ import {
 import { dirname, resolve } from "node:path";
 import { z } from "zod";
 import type { DataPaths } from "../config/config.js";
+import type { KnowledgeBase } from "../knowledge/knowledge.js";
+import type { LongTermMemory } from "../memory/longterm.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
 import {
@@ -38,6 +40,8 @@ export interface ToolContext {
   vehicles: VehicleStore;
   taste: TasteManager;
   paths: DataPaths;
+  knowledge?: KnowledgeBase;
+  longTerm?: LongTermMemory;
 }
 
 const SearchWebSchema = z.object({ query: z.string().min(1) });
@@ -105,6 +109,10 @@ const ComparePartsSchema = z.object({
 const DiagnoseSchema = z.object({
   symptoms: z.array(z.string()).min(1),
   notes: z.string().optional(),
+});
+const SearchKnowledgeSchema = z.object({
+  query: z.string().min(1),
+  vehicleId: z.string().optional(),
 });
 
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
@@ -259,6 +267,19 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ["symptoms"],
     },
   },
+  {
+    name: "search_knowledge",
+    description:
+      "Search the user's local knowledge base (manuals, notes, PDFs). Results are labeled as USER DOCUMENT.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string" },
+        vehicleId: { type: "string" },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export async function executeTool(
@@ -335,6 +356,22 @@ export async function executeTool(
       case "diagnose_symptoms": {
         const data = DiagnoseSchema.parse(args);
         return { name, ok: true, output: diagnoseTool(data.symptoms, data.notes) };
+      }
+      case "search_knowledge": {
+        const data = SearchKnowledgeSchema.parse(args);
+        if (!ctx.knowledge) {
+          return { name, ok: false, output: "Knowledge base not available." };
+        }
+        const vehicleIds = data.vehicleId
+          ? [data.vehicleId]
+          : ctx.vehicles.getActiveId()
+            ? [ctx.vehicles.getActiveId()!]
+            : [];
+        return {
+          name,
+          ok: true,
+          output: ctx.knowledge.search(data.query, { vehicleIds }),
+        };
       }
       default:
         return { name, ok: false, output: `Unknown tool: ${name}` };

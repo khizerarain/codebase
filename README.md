@@ -1,149 +1,135 @@
 # Codebase
 
-**Terminal-first AI vehicle agent** that continuously learns your personal vehicle taste — how *you* maintain, diagnose, modify, and care for cars, trucks, EVs, and fleets.
+**Terminal-first AI vehicle agent** and personal **garage intelligence system** that learns your vehicle taste — how *you* maintain, diagnose, modify, and care for cars, trucks, EVs, and fleets.
 
-Phase 3: strong agentic core + real vehicle intelligence (planning, tools, rich profiles, professional outputs).
+Local-first. Private by default. Skills + knowledge + multi-vehicle aware.
 
-## Features
-
-- Interactive CLI chat (`codebase` / `cb`)
-- **Plan → Review → Execute** loop with saved Markdown plans
-- Taste engine + skills injected on every request
-- Rich multi-vehicle profiles (mileage, fuel type, mods, issues, service history)
-- Professional outputs: schedules, diagnostics, parts comparisons, checklists, cost ranges
-- Expanded local tools (vehicle CRUD, recalls/TSB search, maintenance schedules, …)
-- OpenRouter + Ollama providers
-- Fully local-first under `~/.codebase/`
+> **Safety:** Decision-support only — not a certified mechanic. See `/safety`.
 
 ## Install
 
 ```bash
+git clone https://github.com/khizerarain/codebase.git
+cd codebase
 pnpm install
 pnpm build
-pnpm link --global
+pnpm link --global   # or: npm link
 ```
 
-On Windows, if `pnpm link --global` fails PATH checks:
+Needs Node.js 20+ and either OpenRouter or local Ollama.
 
 ```bash
-npm link
-```
-
-## Configure
-
-```bash
-set OPENROUTER_API_KEY=sk-or-...
-set CODEBASE_PROVIDER=openrouter
-
+$env:OPENROUTER_API_KEY="sk-or-..."
 # or
-set CODEBASE_PROVIDER=ollama
-set OLLAMA_MODEL=llama3.2
-```
-
-## Usage
-
-```bash
+$env:CODEBASE_PROVIDER="ollama"
 codebase
-codebase chat --provider ollama
 ```
 
-### Planning
-
-Non-trivial requests auto-enter planning mode. You can also force it:
-
-```text
-/plan DIY brake pad job with cost estimate
-/approve
-/revise use OEM pads only
-```
-
-Plans are saved under `~/.codebase/plans/` as JSON + Markdown.
-
-### Vehicles
+## Quick start
 
 ```text
 /vehicles add 2018 Toyota Tacoma 92000 gas
-/vehicles switch <id>
-/vehicles edit mileage 93500
-/vehicles edit mod bilstein 5100
-/vehicles edit issue tip-in clunk
-/active
-/history
+/garage
+/skill create OEM Safety :: Prefer OEM on brakes/steering :: Use OEM or OE-quality for safety parts :: oem,safety
+/knowledge add ./my-manual.md active
+/schedule
+/insights
 ```
 
-### Domain modes
+## What’s new in Phase 5
 
-| Command | Action |
-|---------|--------|
-| `/schedule` | Maintenance schedule for active vehicle |
-| `/diagnose squeal on braking` | Structured diagnostic plan/reasoning |
-| `/parts front brake pads` | Parts research / OEM vs aftermarket |
-| `/export brakes.md` | Export last plan/output |
+### Skills you control
+- Auto-learned skills still appear from Accept/Reject/Edit
+- Create/edit/enable/disable your own Markdown skills
+- Vehicle-specific or global; relevant skills inject into every prompt
 
-### Taste (Phase 2 still fully active)
+```text
+/skill list
+/skill create Winter Prep :: Cold-climate rules :: Use -40 washer fluid | Block heater notes :: climate,winter
+/skill edit winter-prep
+/skill disable budget-conscious
+```
 
-| Command | Action |
-|---------|--------|
-| `/accept` `/reject` `/edit` | Capture taste signals + learn |
-| `/taste` `/taste edit` | View / edit living taste |
-| `/skills` `/forget` `/learn` | Manage skills & re-analyze |
+### Garage intelligence
+```text
+/garage
+/garage pref Prefer weekend DIY blocks under 3 hours
+/compare <idA> <idB>
+/compare approaches brake job
+/insights
+```
 
-### Session
+### Local knowledge base
+Ingest manuals, notes, or text-based PDFs. The agent searches them via `search_knowledge` and labels hits as **USER DOCUMENT**.
 
-`/help` · `/clear` · `/exit`
+```text
+/knowledge add D:\manuals\tacoma-service.md active
+/knowledge search valve clearance
+/knowledge list
+```
 
-## How taste still applies
+### Long-term memory
+Durable facts across sessions (personal / vehicle / one-time context):
 
-Every answer and plan injects:
-1. Compact personal + vehicle-specific preferences
-2. Only the most relevant skills for the current query
-3. Active vehicle context
+```text
+/memory add personal Prefer Motul 5W-30 in winter
+/memory add vehicle Has Bilstein 5100s at stock height
+/memory pending
+/memory confirm
+```
 
-Tools like `compare_parts` and `generate_maintenance_schedule` also bias toward your learned DIY/OEM/budget/performance preferences.
+High-impact turns may propose memory facts — confirm or reject explicitly.
 
-## Safety
+## Core loop (still Phase 1–4)
 
-Codebase labels diagnostic conclusions as **suggestions**, not certainty, and appends safety notes on critical topics (brakes, steering, HV/EV, etc.). Always verify torque specs and procedures with OEM service information.
+1. Ask or run a command  
+2. Non-trivial work → Plan → `/approve`  
+3. Accept / Reject / Edit → taste + skills learn  
+4. Next session is smarter  
+
+## Command map
+
+| Area | Commands |
+|------|----------|
+| Taste | `/accept` `/reject` `/edit` `/taste` `/learn` `/forget` |
+| Skills | `/skill list\|create\|edit\|enable\|disable\|delete` |
+| Garage | `/garage` `/vehicles` `/active` `/compare` `/insights` `/history` |
+| Knowledge | `/knowledge add\|list\|search\|remove` |
+| Memory | `/memory list\|add\|remove\|pending\|confirm\|reject` |
+| Domain | `/schedule` `/diagnose` `/parts` `/plan` `/approve` |
+| System | `/export` `/config` `/safety` `/help` |
+
+## Privacy
+
+- No accounts, no cloud sync, no telemetry
+- Data under `~/.codebase/` (or `CODEBASE_HOME`)
+- LLM calls only to the provider you choose
 
 ## Data layout
 
 ```
 ~/.codebase/
 ├── config.json
-├── taste/
-│   ├── taste.md
-│   ├── profile.json
-│   ├── signals/
-│   └── skills/
+├── garage-preferences.json
+├── taste/skills/          # learned + user skills
+├── knowledge/             # manuals + index
+├── memory/longterm.json
 ├── vehicles/
-│   ├── _active.json
-│   └── <id>.json
 ├── plans/
-├── exports/
-├── memory/
-└── sessions/
+└── exports/
 ```
-
-## Tools
-
-`search_web` · `read_file` · `write_file` · `list_dir` · `calculate` · `get_vehicle` · `update_vehicle` · `create_checklist` · `estimate_cost` · `search_recalls_tsb` · `generate_maintenance_schedule` · `compare_parts` · `diagnose_symptoms`
 
 ## Develop
 
 ```bash
-pnpm typecheck
 pnpm test
 pnpm build
 ```
 
+See [CONTRIBUTING.md](./CONTRIBUTING.md). License: [MIT](./LICENSE).
+
 ## Roadmap
 
-- **Phase 1** — Core agent + taste capture ✅
-- **Phase 2** — Full taste learning engine ✅
-- **Phase 3** — Strong agentic core + vehicle intelligence ✅
-- **Phase 4** — Planning polish + deeper safety layer
-- **Phase 5** — Multi-vehicle polish, skills export, UX finish
-
-## License
-
-MIT
+- Phases 1–4 ✅ foundation, taste, agent tools, safety/polish  
+- **Phase 5** ✅ skills, garage, knowledge, long-term memory  
+- Later: OBD/hardware (optional), deeper PDF tooling, export packs  

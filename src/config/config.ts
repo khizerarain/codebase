@@ -21,6 +21,11 @@ export const ConfigSchema = z.object({
   dataDir: z.string().optional(),
   maxToolRounds: z.number().int().positive().default(8),
   contextMessageLimit: z.number().int().positive().default(24),
+  toolRetries: z.number().int().nonnegative().default(2),
+  exportFormat: z.enum(["md", "txt"]).default("md"),
+  exportDir: z.string().optional(),
+  defaultVehicleId: z.string().optional(),
+  recoverLastSession: z.boolean().default(true),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -35,8 +40,10 @@ export interface DataPaths {
   sessions: string;
   plans: string;
   exports: string;
+  knowledge: string;
   configFile: string;
   tasteFile: string;
+  garagePrefsFile: string;
 }
 
 /** Resolve ~/.codebase (or CODEBASE_HOME / project .codebase). */
@@ -50,7 +57,7 @@ export function resolveDataRoot(override?: string): string {
   return join(homedir(), ".codebase");
 }
 
-export function getDataPaths(root?: string): DataPaths {
+export function getDataPaths(root?: string, exportDirOverride?: string): DataPaths {
   const base = resolveDataRoot(root);
   return {
     root: base,
@@ -61,9 +68,11 @@ export function getDataPaths(root?: string): DataPaths {
     vehicles: join(base, "vehicles"),
     sessions: join(base, "sessions"),
     plans: join(base, "plans"),
-    exports: join(base, "exports"),
+    exports: exportDirOverride ? exportDirOverride : join(base, "exports"),
+    knowledge: join(base, "knowledge"),
     configFile: join(base, "config.json"),
     tasteFile: join(base, "taste", "taste.md"),
+    garagePrefsFile: join(base, "garage-preferences.json"),
   };
 }
 
@@ -79,8 +88,25 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
     paths.sessions,
     paths.plans,
     paths.exports,
+    paths.knowledge,
+    join(paths.knowledge, "docs"),
   ]) {
     mkdirSync(dir, { recursive: true });
+  }
+
+  if (!existsSync(paths.garagePrefsFile)) {
+    writeFileSync(
+      paths.garagePrefsFile,
+      JSON.stringify(
+        {
+          notes: "",
+          preferences: [] as string[],
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
   }
 
   if (!existsSync(paths.tasteFile)) {
@@ -181,5 +207,87 @@ export function loadConfig(paths: DataPaths = ensureDataDirs()): Config {
 
 export function saveConfig(config: Config, paths: DataPaths = getDataPaths()): void {
   ensureDataDirs(paths);
-  writeFileSync(paths.configFile, JSON.stringify(config, null, 2), "utf8");
+  // Never persist API keys from env into the file if they came only from env —
+  // still allow explicit file values. Strip obviously env-injected secrets when
+  // writing back from /config by keeping whatever is already on disk for apiKey
+  // unless the caller set it intentionally.
+  const toWrite = ConfigSchema.parse(config);
+  writeFileSync(paths.configFile, JSON.stringify(toWrite, null, 2), "utf8");
+}
+
+export function formatConfigForDisplay(config: Config, paths: DataPaths): string {
+  return [
+    "Codebase config",
+    "───────────────",
+    `provider:           ${config.provider}`,
+    `openrouter.model:   ${config.openrouter.model}`,
+    `ollama.model:       ${config.ollama.model}`,
+    `ollama.baseUrl:     ${config.ollama.baseUrl}`,
+    `maxToolRounds:      ${config.maxToolRounds}`,
+    `contextMessageLimit:${config.contextMessageLimit}`,
+    `toolRetries:        ${config.toolRetries}`,
+    `exportFormat:       ${config.exportFormat}`,
+    `exportDir:          ${config.exportDir ?? paths.exports}`,
+    `defaultVehicleId:   ${config.defaultVehicleId ?? "(active vehicle file)"}`,
+    `recoverLastSession: ${config.recoverLastSession}`,
+    `dataDir:            ${paths.root}`,
+    `configFile:         ${paths.configFile}`,
+    "",
+    "Edit: /config set <key> <value>",
+    "Keys: provider | openrouter.model | ollama.model | ollama.baseUrl |",
+    "      exportFormat | exportDir | defaultVehicleId | toolRetries |",
+    "      maxToolRounds | contextMessageLimit | recoverLastSession",
+  ].join("\n");
+}
+
+export function setConfigValue(
+  config: Config,
+  key: string,
+  value: string,
+): Config {
+  const next = structuredClone(config);
+  switch (key) {
+    case "provider":
+      if (value !== "openrouter" && value !== "ollama") {
+        throw new Error("provider must be openrouter or ollama");
+      }
+      next.provider = value;
+      break;
+    case "openrouter.model":
+      next.openrouter.model = value;
+      break;
+    case "ollama.model":
+      next.ollama.model = value;
+      break;
+    case "ollama.baseUrl":
+      next.ollama.baseUrl = value;
+      break;
+    case "exportFormat":
+      if (value !== "md" && value !== "txt") {
+        throw new Error("exportFormat must be md or txt");
+      }
+      next.exportFormat = value;
+      break;
+    case "exportDir":
+      next.exportDir = value;
+      break;
+    case "defaultVehicleId":
+      next.defaultVehicleId = value === "null" || value === "none" ? undefined : value;
+      break;
+    case "toolRetries":
+      next.toolRetries = Number(value);
+      break;
+    case "maxToolRounds":
+      next.maxToolRounds = Number(value);
+      break;
+    case "contextMessageLimit":
+      next.contextMessageLimit = Number(value);
+      break;
+    case "recoverLastSession":
+      next.recoverLastSession = value === "true" || value === "1";
+      break;
+    default:
+      throw new Error(`Unknown config key: ${key}`);
+  }
+  return ConfigSchema.parse(next);
 }

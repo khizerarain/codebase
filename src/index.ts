@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { buildProgram } from "./cli.js";
+import { friendlyError } from "./utils/errors.js";
 
 async function main(): Promise<void> {
   const program = buildProgram();
@@ -7,6 +8,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((err: unknown) => {
-  console.error(err instanceof Error ? err.message : err);
+  console.error(friendlyError(err));
   process.exit(1);
 });

@@ -10,6 +10,17 @@ import { join } from "node:path";
 import { ensureDataDirs, type DataPaths } from "../config/config.js";
 import { SkillSchema, type Skill } from "./schema.js";
 
+export interface CreateSkillInput {
+  name: string;
+  description: string;
+  whenToApply?: string;
+  rules: string[];
+  tags?: string[];
+  scope?: "personal" | "vehicle";
+  vehicleIds?: string[];
+  confidence?: number;
+}
+
 /** Local Markdown skill files under taste/skills/. */
 export class SkillStore {
   private readonly dir: string;
@@ -23,12 +34,13 @@ export class SkillStore {
     return join(this.dir, `${slug}.md`);
   }
 
-  list(): Skill[] {
+  list(opts: { includeDisabled?: boolean } = {}): Skill[] {
     if (!existsSync(this.dir)) return [];
     return readdirSync(this.dir)
       .filter((f) => f.endsWith(".md"))
       .map((f) => this.read(f.replace(/\.md$/, "")))
       .filter((s): s is Skill => s !== null)
+      .filter((s) => opts.includeDisabled || s.enabled)
       .sort((a, b) => b.confidence - a.confidence || a.name.localeCompare(b.name));
   }
 
@@ -37,7 +49,7 @@ export class SkillStore {
     const bySlug = this.read(needle);
     if (bySlug) return bySlug;
     return (
-      this.list().find(
+      this.list({ includeDisabled: true }).find(
         (s) =>
           s.slug === needle ||
           s.name.toLowerCase() === needle ||
@@ -55,9 +67,50 @@ export class SkillStore {
     return parsed;
   }
 
+  create(input: CreateSkillInput): Skill {
+    const slug = slugify(input.name);
+    if (this.get(slug)) {
+      throw new Error(`Skill already exists: ${slug}. Use /skill edit ${slug}`);
+    }
+    const now = new Date().toISOString();
+    return this.upsert({
+      slug,
+      name: input.name,
+      description: input.description,
+      whenToApply: input.whenToApply ?? "When the topic matches this skill",
+      rules: input.rules.length ? input.rules : [input.description],
+      confidence: input.confidence ?? 0.85,
+      scope: input.scope ?? "personal",
+      vehicleIds: input.vehicleIds ?? [],
+      tags: input.tags ?? [],
+      evidenceCount: 1,
+      enabled: true,
+      source: "user",
+      createdAt: now,
+      lastUpdated: now,
+    });
+  }
+
+  setEnabled(slugOrName: string, enabled: boolean): Skill {
+    const skill = this.get(slugOrName);
+    if (!skill) throw new Error(`Skill not found: ${slugOrName}`);
+    return this.upsert({ ...skill, enabled });
+  }
+
+  touchLastUsed(slug: string): void {
+    const skill = this.read(slug);
+    if (!skill) return;
+    this.upsert({ ...skill, lastUsed: new Date().toISOString() });
+  }
+
   remove(slug: string): boolean {
     const file = this.pathFor(slug);
-    if (!existsSync(file)) return false;
+    if (!existsSync(file)) {
+      const found = this.get(slug);
+      if (!found) return false;
+      unlinkSync(this.pathFor(found.slug));
+      return true;
+    }
     unlinkSync(file);
     return true;
   }
@@ -73,15 +126,20 @@ export class SkillStore {
   }
 
   formatList(): string {
-    const skills = this.list();
+    const skills = this.list({ includeDisabled: true });
     if (skills.length === 0) {
-      return "No skills learned yet. Accept/Reject/Edit answers to build them.";
+      return "No skills yet. Create one with /skill create, or teach via Accept/Reject/Edit.";
     }
     return skills
-      .map(
-        (s) =>
-          `• ${s.name} (${s.slug}) · confidence ${(s.confidence * 100).toFixed(0)}% · evidence ${s.evidenceCount}`,
-      )
+      .map((s) => {
+        const state = s.enabled ? "on" : "off";
+        const src = s.source === "user" ? "user" : "learned";
+        const scope =
+          s.scope === "vehicle"
+            ? `vehicle:${(s.vehicleIds ?? []).map((id) => id.slice(0, 8)).join(",") || "?"}`
+            : "global";
+        return `• [${state}] ${s.name} (\`${s.slug}\`) · ${src} · ${scope} · ${(s.confidence * 100).toFixed(0)}% · tags: ${s.tags.join(", ") || "-"}`;
+      })
       .join("\n");
   }
 
@@ -99,14 +157,14 @@ export class SkillStore {
     const vehicleSet = new Set(vehicleIds);
 
     const scored = this.list()
-      .filter((s) => s.confidence >= 0.45)
+      .filter((s) => s.enabled && s.confidence >= 0.4)
       .map((s) => {
         let score = s.confidence * 10 + Math.min(s.evidenceCount, 5);
 
         if (s.scope === "vehicle") {
           const overlap = (s.vehicleIds ?? []).some((id) => vehicleSet.has(id));
           if (!overlap) return { s, score: -1 };
-          score += 4;
+          score += 5;
         }
 
         for (const tag of s.tags) {
@@ -115,11 +173,13 @@ export class SkillStore {
           }
         }
 
-        for (const token of tokenize(`${s.name} ${s.description} ${s.whenToApply}`)) {
+        for (const token of tokenize(
+          `${s.name} ${s.description} ${s.whenToApply} ${s.rules.join(" ")}`,
+        )) {
           if (tokens.has(token)) score += 1.5;
         }
 
-        // Soft boost for generally useful high-confidence personal skills
+        if (s.source === "user") score += 1.5;
         if (s.scope === "personal" && s.confidence >= 0.7) score += 1;
 
         return { s, score };
@@ -129,10 +189,17 @@ export class SkillStore {
 
     const picked = scored.slice(0, limit).map((x) => x.s);
 
-    // Always include top personal skill if nothing matched but skills exist
+    for (const s of picked) {
+      try {
+        this.touchLastUsed(s.slug);
+      } catch {
+        // ignore
+      }
+    }
+
     if (picked.length === 0) {
       return this.list()
-        .filter((s) => s.scope === "personal" && s.confidence >= 0.6)
+        .filter((s) => s.enabled && s.scope === "personal" && s.confidence >= 0.6)
         .slice(0, Math.min(2, limit));
     }
 
@@ -151,6 +218,9 @@ export function skillToMarkdown(skill: Skill): string {
       vehicleIds: skill.vehicleIds ?? [],
       tags: skill.tags,
       evidenceCount: skill.evidenceCount,
+      enabled: skill.enabled,
+      source: skill.source,
+      lastUsed: skill.lastUsed ?? null,
       createdAt: skill.createdAt,
       lastUpdated: skill.lastUpdated,
     })} -->`,
@@ -161,9 +231,17 @@ export function skillToMarkdown(skill: Skill): string {
     "",
     `**Confidence:** ${(skill.confidence * 100).toFixed(0)}%`,
     "",
+    `**Enabled:** ${skill.enabled ? "yes" : "no"}`,
+    "",
+    `**Source:** ${skill.source}`,
+    "",
     `**Scope:** ${skill.scope}${
       skill.vehicleIds?.length ? ` (${skill.vehicleIds.join(", ")})` : ""
     }`,
+    "",
+    `**Tags:** ${skill.tags.join(", ") || "-"}`,
+    "",
+    `**Last used:** ${skill.lastUsed ?? "never"}`,
     "",
     `**Last updated:** ${skill.lastUpdated}`,
     "",
@@ -210,9 +288,20 @@ export function markdownToSkill(markdown: string, fallbackSlug: string): Skill {
     vehicleIds: (meta.vehicleIds as string[] | undefined) ?? [],
     tags: (meta.tags as string[] | undefined) ?? [],
     evidenceCount: Number(meta.evidenceCount ?? 1),
+    enabled: meta.enabled === undefined ? true : Boolean(meta.enabled),
+    source: meta.source === "user" ? "user" : "learned",
+    lastUsed: meta.lastUsed ? String(meta.lastUsed) : undefined,
     createdAt: String(meta.createdAt ?? new Date().toISOString()),
     lastUpdated: String(meta.lastUpdated ?? new Date().toISOString()),
   });
+}
+
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 64);
 }
 
 function tokenize(text: string): Set<string> {

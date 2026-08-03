@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as readline from "node:readline/promises";
@@ -10,11 +10,37 @@ import ora from "ora";
 import { Agent } from "./agent/agent.js";
 import { createLLMProvider } from "./agent/llm.js";
 import { SESSION_HELP } from "./agent/prompts.js";
+import { SAFETY_HELP } from "./agent/safety.js";
 import { executeTool } from "./agent/tools.js";
-import { ensureDataDirs, getDataPaths, loadConfig } from "./config/config.js";
+import {
+  ensureDataDirs,
+  formatConfigForDisplay,
+  getDataPaths,
+  loadConfig,
+  saveConfig,
+  setConfigValue,
+  type Config,
+} from "./config/config.js";
+import {
+  handleCompareCommand,
+  handleGarageCommand,
+  handleInsights,
+  handleKnowledgeCommand,
+  handleMemoryCommand,
+  handleSkillCommand,
+} from "./cli/phase5.js";
+import { exportContent } from "./export/export.js";
+import { GarageService } from "./garage/garage.js";
 import { MemoryStore } from "./memory/memory.js";
+import {
+  markOnboardingComplete,
+  needsOnboarding,
+  printEmptyGarageHint,
+  printOnboarding,
+} from "./onboarding/onboarding.js";
 import type { LearningInsight } from "./taste/schema.js";
 import { TasteManager } from "./taste/taste.js";
+import { friendlyError } from "./utils/errors.js";
 import { logger } from "./utils/logger.js";
 import type { FuelType } from "./vehicles/schema.js";
 import { VehicleStore } from "./vehicles/vehicles.js";
@@ -30,7 +56,7 @@ export function buildProgram(): Command {
   program
     .name("codebase")
     .description("Terminal-first AI vehicle agent that learns your taste")
-    .version("0.3.0");
+    .version("0.5.0");
 
   program
     .command("chat", { isDefault: true })
@@ -94,21 +120,53 @@ export function buildProgram(): Command {
 }
 
 async function runChatSession(providerOverride?: string): Promise<void> {
-  const paths = ensureDataDirs(getDataPaths());
-  const config = loadConfig(paths);
+  let paths = ensureDataDirs(getDataPaths());
+  let config = loadConfig(paths);
+  if (config.exportDir) {
+    paths = ensureDataDirs(getDataPaths(undefined, config.exportDir));
+  }
   if (providerOverride === "openrouter" || providerOverride === "ollama") {
     config.provider = providerOverride;
   }
 
   const taste = new TasteManager(paths);
-  const memory = new MemoryStore(paths);
+  const memory = new MemoryStore(paths, config.recoverLastSession);
   const vehicles = new VehicleStore(paths);
+
+  if (config.defaultVehicleId) {
+    try {
+      vehicles.setActive(config.defaultVehicleId);
+    } catch {
+      // ignore invalid saved default
+    }
+  }
+
   const agent = new Agent(config, taste, memory, vehicles, paths);
+  const garage = new GarageService(vehicles, taste, paths);
 
   const active = vehicles.getActive();
   if (active) memory.setActiveVehicle(active.id);
 
   logger.banner();
+
+  const firstTime = needsOnboarding(paths, vehicles);
+  if (firstTime) {
+    printOnboarding(vehicles.list().length === 0);
+    markOnboardingComplete(paths);
+  } else if (vehicles.list().length === 0) {
+    printEmptyGarageHint();
+  }
+
+  if (
+    config.recoverLastSession &&
+    memory.getSession().messages.length > 0 &&
+    !firstTime
+  ) {
+    logger.info(
+      `Recovered session (${memory.getSession().messages.length} messages). /clear to start fresh.`,
+    );
+  }
+
   logger.info(`Data: ${paths.root}`);
   logger.info(`Provider: ${config.provider}`);
   if (config.provider === "openrouter") {
@@ -126,22 +184,31 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   } else {
     logger.dim("No active vehicle yet — add one with /vehicles add …");
   }
-  logger.dim("Type a question, or /help for session commands.\n");
+  logger.dim("Type a question, or /help · /safety for guidance.\n");
 
   const rl = readline.createInterface({ input, output, terminal: true });
   let pending: PendingAnswer | null = null;
   let running = true;
+  let busy = false;
 
   const shutdown = () => {
     if (!running) return;
     running = false;
-    memory.persistSession();
+    try {
+      memory.persistSession();
+    } catch {
+      // ignore persist errors on exit
+    }
     console.log();
-    logger.info("Session saved. See you next wrench.");
+    logger.info(busy ? "Interrupted. Session saved." : "Session saved. See you next wrench.");
     rl.close();
   };
 
   process.on("SIGINT", () => {
+    if (busy) {
+      logger.warn("Cancelling current operation…");
+      busy = false;
+    }
     shutdown();
     process.exit(0);
   });
@@ -179,6 +246,23 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       continue;
     }
 
+    if (line === "/safety") {
+      console.log("\n" + SAFETY_HELP + "\n");
+      continue;
+    }
+
+    if (line === "/onboarding") {
+      printOnboarding(vehicles.list().length === 0);
+      continue;
+    }
+
+    if (line === "/config" || line.startsWith("/config ")) {
+      const handled = handleConfigCommand(line, config, paths, vehicles);
+      config = handled.config;
+      if (handled.paths) paths = handled.paths;
+      continue;
+    }
+
     if (line === "/clear") {
       memory.clearSession();
       pending = null;
@@ -198,8 +282,38 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       continue;
     }
 
-    if (line === "/skills" || line.startsWith("/skills ")) {
-      handleSkillsCommand(line, taste);
+    if (
+      line === "/skill" ||
+      line.startsWith("/skill ") ||
+      line === "/skills" ||
+      line.startsWith("/skills ")
+    ) {
+      await handleSkillCommand(line, taste, vehicles);
+      continue;
+    }
+
+    if (line === "/garage" || line.startsWith("/garage ")) {
+      handleGarageCommand(line, garage, paths);
+      continue;
+    }
+
+    if (line === "/insights") {
+      handleInsights(garage);
+      continue;
+    }
+
+    if (line === "/compare" || line.startsWith("/compare ")) {
+      handleCompareCommand(line, garage);
+      continue;
+    }
+
+    if (line === "/knowledge" || line.startsWith("/knowledge ")) {
+      handleKnowledgeCommand(line, agent.knowledge, vehicles);
+      continue;
+    }
+
+    if (line === "/memory" || line.startsWith("/memory ")) {
+      handleMemoryCommand(line, agent.longTerm, vehicles);
       continue;
     }
 
@@ -245,7 +359,8 @@ async function runChatSession(providerOverride?: string): Promise<void> {
         {},
         { vehicles, taste, paths },
       );
-      console.log("\n" + out.output + "\n");
+      agent.setLastExportable(out.output, "schedule");
+      logger.agent(out.output);
       pending = { response: out.output, userMessage: line };
       continue;
     }
@@ -281,18 +396,25 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
 
     if (line === "/export" || line.startsWith("/export ")) {
-      const name =
-        line.replace(/^\/export\s*/, "").trim().replace(/[^\w.-]+/g, "-") ||
-        `export-${Date.now()}`;
-      const content = agent.getLastExportable();
-      if (!content) {
-        logger.warn("Nothing to export yet.");
-        continue;
+      const arg = line.replace(/^\/export\s*/, "").trim() || "last";
+      const format =
+        arg.endsWith(".txt") || arg === "txt" ? "txt" : config.exportFormat;
+      const kind = arg.replace(/\.(md|txt)$/i, "") || "last";
+      try {
+        if (!agent.exports.last && agent.getLastExportable()) {
+          agent.setLastExportable(agent.getLastExportable());
+        }
+        const result = exportContent(
+          paths,
+          agent.exports,
+          kind,
+          format,
+          agent.getPendingPlan(),
+        );
+        logger.success(`Exported ${result.kind} → ${result.path} (${result.bytes} bytes)`);
+      } catch (err) {
+        logger.warn(friendlyError(err));
       }
-      mkdirSync(paths.exports, { recursive: true });
-      const file = join(paths.exports, name.endsWith(".md") ? name : `${name}.md`);
-      writeFileSync(file, content, "utf8");
-      logger.success(`Exported ${file}`);
       continue;
     }
 
@@ -427,35 +549,80 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
 
     const spinner = ora({ text: "Thinking…", color: "cyan" }).start();
+    busy = true;
     try {
       const result = await agent.respond(line);
       spinner.stop();
+      busy = false;
       logger.agent(result.response);
       if (result.kind === "plan") {
         logger.dim("Plan ready: /approve · /revise <feedback> · or type feedback");
       } else {
         logger.dim("Signal: Enter//accept · /reject [reason] · /edit");
         pending = result;
+        if (result.memoryProposals?.length) {
+          for (const proposal of result.memoryProposals) {
+            const pendingMem = agent.longTerm.proposeExtraction(
+              proposal,
+              "personal",
+              memory.getSession().vehicleIds,
+            );
+            logger.info(
+              `Memory proposal (${pendingMem.id.slice(0, 8)}): ${pendingMem.text}`,
+            );
+            logger.dim("  /memory confirm · /memory reject · /memory pending");
+          }
+        }
       }
     } catch (err) {
       spinner.stop();
-      logger.error(err instanceof Error ? err.message : String(err));
+      busy = false;
+      logger.error(friendlyError(err));
     }
   }
 }
 
-function handleSkillsCommand(line: string, taste: TasteManager): void {
-  const name = line.replace(/^\/skills\s*/, "").trim();
-  if (!name) {
-    console.log("\n" + taste.engine.skills.formatList() + "\n");
-    return;
+function handleConfigCommand(
+  line: string,
+  config: Config,
+  paths: ReturnType<typeof getDataPaths>,
+  vehicles: VehicleStore,
+): { config: Config; paths?: ReturnType<typeof getDataPaths> } {
+  const rest = line.replace(/^\/config\s*/, "").trim();
+  if (!rest) {
+    console.log("\n" + formatConfigForDisplay(config, paths) + "\n");
+    return { config };
   }
-  const skill = taste.getSkill(name);
-  if (!skill) {
-    logger.warn(`Skill not found: ${name}`);
-    return;
+
+  if (rest.startsWith("set ")) {
+    const body = rest.slice(4).trim();
+    const sp = body.indexOf(" ");
+    if (sp === -1) {
+      logger.warn("Usage: /config set <key> <value>");
+      return { config };
+    }
+    const key = body.slice(0, sp);
+    const value = body.slice(sp + 1).trim();
+    try {
+      const next = setConfigValue(config, key, value);
+      if (key === "defaultVehicleId" && next.defaultVehicleId) {
+        vehicles.setActive(next.defaultVehicleId);
+      }
+      saveConfig(next, paths);
+      let newPaths = paths;
+      if (key === "exportDir" && next.exportDir) {
+        newPaths = ensureDataDirs(getDataPaths(undefined, next.exportDir));
+      }
+      logger.success(`Config updated: ${key}`);
+      return { config: next, paths: newPaths };
+    } catch (err) {
+      logger.warn(friendlyError(err));
+      return { config };
+    }
   }
-  console.log("\n" + taste.engine.skills.formatOne(skill) + "\n");
+
+  logger.warn("Usage: /config | /config set <key> <value>");
+  return { config };
 }
 
 function logLearning(insight: LearningInsight): void {
@@ -521,7 +688,7 @@ async function handleVehiclesCommand(
       memory.setActiveVehicle(v.id);
       logger.success(`Active: ${v.year} ${v.make} ${v.model}`);
     } catch (err) {
-      logger.error(err instanceof Error ? err.message : String(err));
+      logger.error(friendlyError(err));
     }
     return;
   }
@@ -584,7 +751,7 @@ async function handleVehiclesCommand(
       logger.success("Vehicle updated.");
       console.log(vehicles.formatDetail(updated));
     } catch (err) {
-      logger.error(err instanceof Error ? err.message : String(err));
+      logger.error(friendlyError(err));
     }
     return;
   }

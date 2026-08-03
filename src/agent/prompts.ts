@@ -6,19 +6,23 @@ export interface PromptContext {
   vehiclesSummary: string;
   activeVehicle: string;
   memoryNotes: string;
+  longTermMemory: string;
+  garagePrefs: string;
   mode?: string;
   approvedPlan?: string;
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
   return [
-    "You are Codebase — a terminal-first AI vehicle agent.",
+    "You are Codebase — a terminal-first AI vehicle agent and personal garage intelligence system.",
     "You help the user maintain, diagnose, modify, and care for their vehicles.",
     "You are practical, safety-aware, and concise. Prefer checklists and clear next steps.",
     "When vehicle context is missing and it matters, ask for make/model/year/mileage.",
     "Follow the user's taste and relevant skills below. Do not invent preferences they never showed.",
-    "Use tools when they improve accuracy (vehicle data, schedules, cost, recalls, checklists).",
+    "Use tools when they improve accuracy (vehicle data, schedules, cost, recalls, checklists, search_knowledge).",
+    "When using search_knowledge, clearly say you are citing the user's own documents vs general knowledge.",
     "You may chain multiple tools. After observations, give a clear final answer.",
+    "Structure longer answers with Suggestion: (hypotheses/options) and Action: (steps if they proceed).",
     "Do not invent torque specs, part numbers, or TSBs. If unsure, say so and suggest verification.",
     "",
     SAFETY_SYSTEM_BLOCK,
@@ -31,13 +35,19 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     "## User Vehicle Taste (compact)",
     ctx.tasteSummary.trim(),
     "",
+    "## Garage Preferences",
+    ctx.garagePrefs.trim(),
+    "",
     "## Relevant Skills",
     ctx.relevantSkills.trim(),
     "",
     "## Vehicles",
     ctx.vehiclesSummary.trim(),
     "",
-    "## Recent Memory Notes",
+    "## Long-term Memory",
+    ctx.longTermMemory.trim(),
+    "",
+    "## Recent Session Notes",
     ctx.memoryNotes.trim(),
     "",
     ctx.approvedPlan
@@ -63,30 +73,62 @@ export function buildPlanPrompt(goal: string, ctx: PromptContext): string {
 }
 
 export const SESSION_HELP = `
-Session commands:
-  /accept [reason]     Mark last answer as good (Enter also accepts)
-  /reject [reason]     Mark last answer as bad
-  /edit                Edit last answer in $EDITOR and save as correction
-  /plan [goal]         Force planning mode (Plan → approve → execute)
-  /approve             Approve pending plan and execute
-  /revise <feedback>   Revise pending plan
-  /vehicles            List vehicles
-  /vehicles add|switch|edit|delete ...
-  /active              Show active vehicle
-  /schedule            Maintenance schedule for active vehicle
-  /diagnose [symptoms] Structured diagnostic mode
-  /parts [part]        Parts research / comparison mode
-  /history             Service history for active vehicle
-  /export [name]       Export last plan/output as Markdown
-  /taste               Show taste summary + top skills
-  /taste edit          Open taste.md in $EDITOR
-  /skills              List learned skills
-  /skills <name>       Show a specific skill
-  /forget <preference> Remove a preference or skill
-  /learn               Re-analyze all signals into taste + skills
-  /clear               Clear current session history
-  /help                Show this help
-  /exit                Quit
+Codebase help
+─────────────
+Chat & taste
+  /accept [reason]      Mark last answer good (Enter also accepts)
+  /reject [reason]      Mark last answer bad
+  /edit                 Edit last answer in $EDITOR → teach taste
+  /taste                Taste summary + top skills
+  /taste edit           Open taste.md
+  /skills [name]        List or show a skill
+  /forget <text>        Remove a preference/skill
+  /learn                Re-analyze all signals
+
+Planning
+  /plan <goal>          Create a plan (also auto for big tasks)
+  /approve              Execute approved plan
+  /revise <feedback>    Revise pending plan
+
+Vehicles
+  /vehicles             List garage
+  /vehicles add <year> <make> <model> [mileage] [fuel]
+  /vehicles switch <id> Set active vehicle
+  /vehicles edit <field> <value>
+  /vehicles delete <id>
+  /active               Show active vehicle
+  /history              Service history
+
+Domain
+  /schedule             Maintenance schedule (active vehicle)
+  /diagnose [symptoms]  Structured diagnosis
+  /parts [part]         OEM vs aftermarket research
+
+Garage & knowledge
+  /garage               Multi-vehicle overview
+  /insights             Upcoming work & garage insights
+  /compare <idA> <idB>  Compare two vehicles
+  /compare approaches <topic>
+  /skill …              Skills: list|create|edit|enable|disable|delete|show
+  /skills [name]        Alias for /skill list|show
+  /knowledge …          add|list|remove|search local manuals/notes
+  /memory …             list|add|remove|pending|confirm|reject
+
+Export & settings
+  /export plan|schedule|checklist|diagnosis|last
+  /config               View / set settings
+  /safety               Safety & limitations
+  /onboarding           Show welcome guide again
+
+Session
+  /clear                Clear conversation (keeps vehicles/taste/memory)
+  /help                 This help
+  /exit                 Quit
+
+Tips
+  • Data stays in ~/.codebase — local-first & private
+  • Non-trivial work opens Plan → /approve → execute
+  • Teach taste + custom skills; cite your manuals via /knowledge
 `.trim();
 
 /** Heuristic: non-trivial work should enter planning mode. */

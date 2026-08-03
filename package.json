@@ -1,7 +1,7 @@
 {
   "name": "codebase",
-  "version": "0.3.0",
-  "description": "Terminal-first AI vehicle agent that learns your personal vehicle taste",
+  "version": "0.5.0",
+  "description": "Terminal-first, local-first AI vehicle agent that learns your personal vehicle taste",
   "type": "module",
   "bin": {
     "codebase": "./dist/index.js",
@@ -24,7 +24,11 @@
     "vehicle",
     "agent",
     "terminal",
-    "automotive"
+    "automotive",
+    "local-first",
+    "ollama",
+    "maintenance",
+    "diy"
   ],
   "license": "MIT",
   "author": "khizerarain",
@@ -55,6 +59,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE",
+    "CONTRIBUTING.md"
   ]
 }

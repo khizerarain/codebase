@@ -70,6 +70,9 @@ export const SkillSchema = z.object({
   vehicleIds: z.array(z.string()).optional(),
   tags: z.array(z.string()).default([]),
   evidenceCount: z.number().int().nonnegative().default(1),
+  enabled: z.boolean().default(true),
+  source: z.enum(["learned", "user"]).default("learned"),
+  lastUsed: z.string().optional(),
   lastUpdated: z.string(),
   createdAt: z.string(),
 });

@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { formatSafetyForTerminal } from "../agent/safety.js";
 
 /** Soft terminal logger with consistent Codebase styling. */
 export const logger = {
@@ -22,19 +23,29 @@ export const logger = {
     console.log(chalk.dim(message));
   },
 
+  divider(): void {
+    console.log(chalk.dim("  ────────────────────────────────────────"));
+  },
+
+  section(title: string): void {
+    console.log();
+    console.log(chalk.bold.white(`  ${title}`));
+    console.log(chalk.dim("  ────────────────────────────────────────"));
+  },
+
   agent(message: string): void {
     console.log();
     console.log(chalk.bold.white("Codebase"), chalk.dim("›"));
-    console.log(message);
+    console.log(formatSafetyForTerminal(wrapLongLines(message, 100)));
     console.log();
   },
 
   thought(message: string): void {
-    console.log(chalk.dim(`  thought: ${message}`));
+    console.log(chalk.dim(`  thought: ${truncate(message, 160)}`));
   },
 
   tool(name: string, detail?: string): void {
-    const suffix = detail ? chalk.dim(` ${detail}`) : "";
+    const suffix = detail ? chalk.dim(` ${truncate(detail, 80)}`) : "";
     console.log(chalk.magenta("  ⚙"), chalk.magenta(name) + suffix);
   },
 
@@ -45,10 +56,42 @@ export const logger = {
       chalk.dim("— terminal-first AI vehicle agent"),
     );
     console.log(
-      chalk.dim(
-        "  Taste-aware · local-first · type /help inside a session",
-      ),
+      chalk.dim("  Taste-aware · local-first · private · type /help"),
     );
     console.log();
   },
 };
+
+function truncate(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/** Soft-wrap long lines for terminal readability without breaking tables much. */
+function wrapLongLines(text: string, width: number): string {
+  return text
+    .split("\n")
+    .map((line) => {
+      if (line.length <= width) return line;
+      // Don't wrap table-like lines
+      if (/\s{2,}/.test(line) && !line.startsWith(" ")) return line;
+      const words = line.split(" ");
+      const out: string[] = [];
+      let cur = "";
+      for (const w of words) {
+        if (!cur) {
+          cur = w;
+          continue;
+        }
+        if ((cur + " " + w).length > width) {
+          out.push(cur);
+          cur = w;
+        } else {
+          cur += " " + w;
+        }
+      }
+      if (cur) out.push(cur);
+      return out.join("\n");
+    })
+    .join("\n");
+}
