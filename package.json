@@ -1,0 +1,60 @@
+{
+  "name": "codebase",
+  "version": "0.2.0",
+  "description": "Terminal-first AI vehicle agent that learns your personal vehicle taste",
+  "type": "module",
+  "bin": {
+    "codebase": "./dist/index.js",
+    "cb": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "chat": "tsx src/index.ts chat",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm build"
+  },
+  "keywords": [
+    "cli",
+    "ai",
+    "vehicle",
+    "agent",
+    "terminal",
+    "automotive"
+  ],
+  "license": "MIT",
+  "author": "khizerarain",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/khizerarain/codebase.git"
+  },
+  "bugs": {
+    "url": "https://github.com/khizerarain/codebase/issues"
+  },
+  "homepage": "https://github.com/khizerarain/codebase#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "chalk": "^5.4.1",
+    "commander": "^13.1.0",
+    "ora": "^8.2.0",
+    "uuid": "^11.1.0",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.10",
+    "@types/uuid": "^10.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "vitest": "^3.0.8"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
