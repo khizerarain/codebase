@@ -281,7 +281,7 @@ export class LocalDataStore {
     const artifacts = this.recentArtifacts(3);
 
     return [
-      "Codebase status",
+      "Bay status",
       "───────────────",
       `dataDir:      ${this.paths.root}`,
       `provider:     ${this.config.provider}`,

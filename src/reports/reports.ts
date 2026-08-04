@@ -46,7 +46,7 @@ export interface SavedReport {
 const DISCLAIMER = [
   "---",
   "",
-  "**Disclaimer:** Codebase is a local decision-support tool — not a certified mechanic,",
+  "**Disclaimer:** Bay is a local decision-support tool — not a certified mechanic,",
   "appraiser, or financial advisor. Verify critical specs with OEM information.",
   "Diagnoses and ownership scores are heuristics from your local data only.",
 ].join("\n");

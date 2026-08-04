@@ -375,7 +375,7 @@ export class Agent {
           "• OpenRouter: set OPENROUTER_API_KEY",
           "• Ollama: ensure it is running, or `/config set provider ollama`",
           "• `/clear` if the recovered session is noisy, then ask again",
-          "• Outside chat: `codebase doctor`",
+          "• Outside chat: `bay doctor`",
         ].join("\n");
         break;
       }

@@ -4,11 +4,11 @@
 
 ## Test plan
 
-- [ ] `pnpm test`
-- [ ] `pnpm typecheck`
+- [ ] `pnpm test:smoke` (or `pnpm run quality`)
 - [ ] Manual CLI check (commands touched):
 
 ## Notes
 
 - Local-first preserved (no cloud/accounts)
-- Docs / `/help` updated if user-facing
+- Docs / `/help` / brand copy updated if user-facing
+- No unfinished experimental UX in default help

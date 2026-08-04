@@ -88,7 +88,7 @@ export async function handleObdCommand(
       const { markdown } = await ctx.obd.snapshot(true);
       agent.setLastExportable(markdown, "diagnosis");
       logger.agent(markdown);
-      logger.dim("Saved under ~/.codebase/obd/snapshots · also logged to service history");
+      logger.dim("Saved under ~/.bay/obd/snapshots · also logged to service history");
       return;
     }
 

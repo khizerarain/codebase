@@ -1,9 +1,38 @@
 # Changelog
 
-All notable changes to Codebase are documented here.
+All notable changes to **Bay** are documented here.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning follows [Semantic Versioning](https://semver.org/).
+
+## [0.14.0] — 2026-08-03
+
+### Added
+- Frozen product identity: **Bay** (`src/brand.ts`) — CLI binary `bay`
+- Launch docs: `docs/launch.md`, `docs/messaging.md`
+- Launch-oriented `/help` and first-run onboarding
+- Brand / identity regression test (`tests/phase14-brand.test.ts`)
+
+### Changed
+- Package renamed from `codebase` → `bay`; removed `cb` / `codebase` binaries
+- Default data directory `~/.bay` (legacy `~/.codebase` / `CODEBASE_*` still honored)
+- Env vars: prefer `BAY_HOME`, `BAY_PROVIDER`, `BAY_VERBOSE`
+- README rewritten for stranger-friendly 30-second value + quick start
+- Version **0.14.0**
+
+## [0.13.0] — 2026-08-03
+
+### Added
+- Deterministic `MockLLMProvider` (`src/testing/`) for offline agent/plan/tool tests
+- Shared test harness + fixtures (`tests/helpers/`)
+- Phase 13 suites: mock LLM agent paths, e2e workflows, data-safety guards, smoke
+- `pnpm test:smoke` and `pnpm run quality` gates
+- GitHub Actions CI (typecheck + test on push/PR)
+- `docs/testing.md` developer testing guide
+
+### Changed
+- Vitest timeouts tuned for multi-step workflow tests
+- `prepublishOnly` runs `pnpm run quality` before build
 
 ## [0.12.0] — 2026-08-03
 

@@ -48,7 +48,7 @@ Every alert includes:
 - optional **suggested commands** (never forced)
 - a dismiss id
 
-State lives in `~/.codebase/automation/state.json` (inspectable / deletable).
+State lives in `~/.bay/automation/state.json` (inspectable / deletable; legacy `~/.codebase` still works if that root is active).
 
 ## Safety
 

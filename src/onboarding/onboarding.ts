@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import { z } from "zod";
+import { APP_DISPLAY_NAME, APP_TAGLINE } from "../brand.js";
 import type { DataPaths } from "../config/config.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
 
@@ -52,14 +53,14 @@ export function markOnboardingComplete(paths: DataPaths): void {
 
 export function printOnboarding(vehiclesEmpty: boolean): void {
   console.log();
-  console.log(chalk.bold.white("  Welcome to Codebase"));
-  console.log(chalk.dim("  Terminal-first AI vehicle agent · local & private"));
+  console.log(chalk.bold.white(`  Welcome to ${APP_DISPLAY_NAME}`));
+  console.log(chalk.dim(`  ${APP_TAGLINE}`));
   console.log(chalk.dim("  ─────────────────────────────────────────────"));
   console.log();
   console.log(chalk.white("  How taste learning works"));
   console.log(
     chalk.dim(
-      "  After each answer, Accept / Reject / Edit. Codebase learns your DIY level,",
+      `  After each answer, Accept / Reject / Edit. ${APP_DISPLAY_NAME} learns your DIY level,`,
     ),
   );
   console.log(
@@ -68,7 +69,7 @@ export function printOnboarding(vehiclesEmpty: boolean): void {
     ),
   );
   console.log();
-  console.log(chalk.white("  Start here"));
+  console.log(chalk.white("  Start here (90-second path)"));
   if (vehiclesEmpty) {
     console.log(
       chalk.cyan("  1."),
@@ -78,13 +79,14 @@ export function printOnboarding(vehiclesEmpty: boolean): void {
   } else {
     console.log(chalk.cyan("  1."), "Confirm active vehicle:", chalk.green("/active"));
   }
-  console.log(chalk.cyan("  2."), "Ask a question or run:", chalk.green("/schedule"));
+  console.log(chalk.cyan("  2."), "Try:", chalk.green("/diagnose brake squeal cold"), "or", chalk.green("/due"));
   console.log(chalk.cyan("  3."), "Teach taste:", chalk.green("/accept"), "·", chalk.green("/reject"), "·", chalk.green("/edit"));
+  console.log(chalk.cyan("  4."), "Optional demo OBD:", chalk.green("/obd connect mock"));
   console.log();
   console.log(chalk.white("  Useful commands"));
   console.log(
     chalk.dim(
-      "  /help  /about  /safety  /diagnose  /service  /ownership  /report  /config",
+      "  /help  /quick  /about  /safety  /service  /ownership  /report  /garage",
     ),
   );
   console.log();

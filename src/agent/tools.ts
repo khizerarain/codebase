@@ -493,7 +493,7 @@ async function searchWeb(query: string): Promise<string> {
   try {
     const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(q)}&format=json&no_html=1&skip_disambig=1`;
     const res = await fetch(url, {
-      headers: { "User-Agent": "CodebaseCLI/0.3" },
+      headers: { "User-Agent": "BayCLI/0.14" },
       signal: AbortSignal.timeout(7000),
     });
     if (res.ok) {

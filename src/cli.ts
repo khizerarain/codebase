@@ -108,13 +108,15 @@ export function buildProgram(): Command {
   const program = new Command();
 
   program
-    .name("codebase")
-    .description("Terminal-first AI vehicle agent that learns your taste")
+    .name("bay")
+    .description(
+      "Local-first AI garage agent that learns how you take care of your vehicles",
+    )
     .version(APP_VERSION);
 
   program
     .command("chat", { isDefault: true })
-    .description("Start an interactive Codebase session")
+    .description("Start an interactive Bay session")
     .option("--provider <provider>", "openrouter | ollama")
     .option("--garage", "Start in garage mode (short checklists)")
     .action(async (opts: { provider?: string; garage?: boolean }) => {
@@ -1092,7 +1094,7 @@ async function handleVehiclesCommand(
 }
 
 async function editInEditor(original: string): Promise<string | null> {
-  const dir = mkdtempSync(join(tmpdir(), "codebase-edit-"));
+  const dir = mkdtempSync(join(tmpdir(), "bay-edit-"));
   const file = join(dir, "response.md");
   writeFileSync(file, original, "utf8");
   return openInEditor(file);

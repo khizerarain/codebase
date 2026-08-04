@@ -1,10 +1,10 @@
 # Local mods
 
-Mods extend Codebase **on your machine only**. There is no marketplace and **no code execution**.
+Mods extend Bay **on your machine only**. There is no marketplace and **no code execution**.
 
 ## Location
 
-`~/.codebase/mods/<mod-id>/mod.json`
+`~/.bay/mods/<mod-id>/mod.json`
 
 ## What a mod can contribute
 

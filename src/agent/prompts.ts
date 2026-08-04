@@ -1,3 +1,4 @@
+import { APP_DISPLAY_NAME, APP_TAGLINE, DATA_DIR_NAME } from "../brand.js";
 import { SAFETY_SYSTEM_BLOCK } from "./safety.js";
 
 export interface PromptContext {
@@ -33,7 +34,7 @@ export const NORMAL_MODE_BLOCK = `
 
 export function buildSystemPrompt(ctx: PromptContext): string {
   return [
-    "You are Codebase — a terminal-first AI vehicle agent and personal garage intelligence system.",
+    `You are ${APP_DISPLAY_NAME} — ${APP_TAGLINE}`,
     "You help the user maintain, diagnose, modify, and care for their vehicles.",
     "You are practical, safety-aware, and concise. Prefer checklists and clear next steps.",
     "When vehicle context is missing and it matters, ask for make/model/year/mileage.",
@@ -101,103 +102,50 @@ export function buildPlanPrompt(goal: string, ctx: PromptContext): string {
 }
 
 export const SESSION_HELP = `
-Codebase help
-─────────────
-Chat & taste
-  /accept [reason]      Mark last answer good (Enter also accepts)
-  /reject [reason]      Mark last answer bad
-  /edit                 Edit last answer in $EDITOR → teach taste
-  /taste                Taste summary + top skills
-  /taste edit           Open taste.md
-  /skills [name]        List or show a skill
-  /forget <text>        Remove a preference/skill
-  /learn                Re-analyze all signals
+${APP_DISPLAY_NAME} help — start here
+────────────────────
+Essentials
+  /vehicles add <year> <make> <model> [mi] [fuel]
+  /diagnose <symptoms>  Structured diagnosis (mock OBD enriches if connected)
+  /service <job>        Service plan → /approve
+  /garage · /due · /health · /attention
+  /taste                What Bay has learned about you
+  /obd connect mock     Demo live data (no hardware)
+  /report ownership     Professional Markdown report
+  /quick                Rapid action menu (garage-friendly)
+  /help · /about · /safety · /exit
+
+Taste
+  /accept · /reject · /edit   Teach Bay after each answer (Enter = accept)
+  /taste edit · /skills · /learn · /forget <text>
+
+Vehicles & garage
+  /vehicles · /active · /history · /garage · /insights · /compare
+  /vehicles switch <id> · /lv (last vehicle)
+
+Service
+  /diagnose · /service · /prep · /log · /due · /schedule · /parts · /inspect
+
+OBD (mock-first)
+  /obd connect mock [scenario] · status · snapshot · dtc · monitor · disconnect
+
+Ownership & decisions
+  /ownership · /health · /report <kind> · /decide keep|sell|buy
+
+Speed
+  /mode garage|normal · /quick · /pretrip · /aliases · /snap
 
 Planning
-  /plan <goal>          Create a plan (also auto for big tasks)
-  /approve              Execute approved plan
-  /revise <feedback>    Revise pending plan
+  /plan <goal> · /approve · /revise <feedback>
 
-Vehicles
-  /vehicles             List garage
-  /vehicles add <year> <make> <model> [mileage] [fuel]
-  /vehicles switch <id> Set active vehicle
-  /vehicles edit <field> <value>
-  /vehicles delete <id>
-  /active               Show active vehicle
-  /history              Service history
-
-Service intelligence
-  /diagnose <symptoms>  Structured multi-step diagnosis (+ live OBD if connected)
-  /service <job>        Full service/repair plan (parts/tools/steps)
-  /prep <job>           Parts + tools staging checklist
-  /log <desc> [mi] [$] [diy|shop]
-  /due [garage]         Overdue / due-soon predictions
-  /inspect [pre-purchase|periodic]
-  /schedule             Full maintenance schedule table
-  /parts [part]         OEM vs aftermarket research
-
-Live OBD (mock-first)
-  /obd connect [mock|serial] [scenario]
-  /obd status|snapshot|dtc|monitor|trends|disconnect
-
-Automation (local watchdogs)
-  /watchdogs list|enable|disable|run|briefing
-  /watchdogs dismiss <id> [days] · clear-dismissals · history
-
-Speed / garage
-  /mode garage|normal   Hands-busy shorter output
-  /quick                Rapid action menu
-  /pretrip              Pre-trip checklist + due
-  /aliases              Short command aliases (/d /g /snap …)
-  /lv                   Switch to last vehicle
-  /interpret            Quick OBD snapshot + codes
-
-Ownership & reports
-  /ownership [/costs]   Cost/mi, health, predictions (add garage)
-  /health [garage]      Quick ownership health snapshot
-  /report <kind>        health|diagnostic|service|ownership|prepurchase|garage|decision
-  /decide buy|keep|sell Decision support (not advice)
-  /decide compare <a> <b>
-  /mods                 list|enable|disable|show|path|skills
-
-Garage & knowledge
-  /garage               Multi-vehicle overview
-  /insights             Upcoming work & ownership-aware insights
-  /compare <idA> <idB>  Compare two vehicles
-  /compare approaches <topic>
-  /skill …              Skills: list|create|edit|enable|disable|delete|show
-  /skills [name]        Alias for /skill list|show
-  /knowledge …          add|list|remove|search local manuals/notes
-  /memory …             list|add|remove|pin|unpin|prune|pending|confirm|reject
-
-Data health & performance
-  /status · /info       System health snapshot
-  /doctor               Check data integrity
-  /backup               Export a local backup of all user data
-  /rebuild              Rebuild knowledge index + prune memory
-  /attention            Garage-wide what-needs-attention
-
-Export & settings
-  /export plan|schedule|checklist|diagnosis|service|last
-  /config               View / set settings (incl. verbose)
-  /safety               Safety & limitations
-  /onboarding           Show welcome guide again
-
-Session & about
-  /version              Package version
-  /about                Product summary + privacy/safety
-  /clear                Clear conversation (keeps vehicles/taste/memory)
-  /help                 This help
-  /exit                 Quit
+More (optional)
+  /watchdogs · /knowledge · /memory · /mods · /export · /config
+  /doctor · /backup · /rebuild · /status · /onboarding · /version
 
 Tips
-  • Data stays in ~/.codebase — local-first & private
-  • Non-trivial work opens Plan → /approve → execute
-  • Reports → exports/reports/ · mods are declarative (no remote code)
-  • Install issues: docs/troubleshooting.md · outside chat: codebase doctor
-  • OBD mock: /obd connect mock · docs/obd.md (no hardware required)
-  • Quiet by default: /watchdogs · automation.assertiveness quiet|normal|assertive
+  • Data: ~/${DATA_DIR_NAME} — local-first & private
+  • Outside chat: bay version · bay doctor
+  • Safety: suggestions only — see /safety
 `.trim();
 
 /** Heuristic: non-trivial work should enter planning mode. */

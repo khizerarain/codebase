@@ -6,6 +6,8 @@ dist/
 .pnpm-debug.log*
 
 # Local / user data (never commit)
+.bay/
+**/.bay/
 .codebase/
 **/.codebase/
 *.log

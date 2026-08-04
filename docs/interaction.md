@@ -1,6 +1,6 @@
 # Fast interaction, garage mode & input providers
 
-Phase 12 makes Codebase faster in real garage use: short aliases, garage mode, rapid workflows, and a pluggable input layer (voice-ready, local-first).
+Phase 12 makes Bay faster in real garage use: short aliases, garage mode, rapid workflows, and a pluggable input layer (voice-ready, local-first).
 
 ## Garage mode
 
@@ -15,7 +15,7 @@ Hands-busy style: shorter answers, checklists, stronger next actions. Safety lan
 Or start a session already in garage mode:
 
 ```bash
-codebase chat --garage
+bay chat --garage
 ```
 
 Persist the default:

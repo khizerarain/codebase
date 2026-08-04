@@ -1,16 +1,18 @@
 # Troubleshooting
 
-## `codebase` / `cb` not found
+## `bay` not found
 
 1. Confirm build: `pnpm build`
 2. Link again: `pnpm link --global` or `npm link`
 3. Ensure npm’s global bin directory is on your `PATH`
 4. Windows: restart the terminal after linking
 
+If you previously linked the old `codebase` / `cb` binaries, unlink them and link again so only `bay` is installed.
+
 ## OpenRouter errors / empty answers
 
 - Set `OPENROUTER_API_KEY`
-- Or switch: `codebase --provider ollama` / `/config set provider ollama`
+- Or switch: `bay --provider ollama` / `/config set provider ollama`
 - Check `/config` and `/status`
 
 ## Ollama connection failed
@@ -21,9 +23,9 @@
 
 ## Permission / data directory errors
 
-- Ensure your user can write to `~/.codebase`
-- Or set `CODEBASE_HOME` to a writable folder
-- Run `/doctor`
+- Ensure your user can write to `~/.bay` (or legacy `~/.codebase` if still in use)
+- Or set `BAY_HOME` to a writable folder
+- Run `/doctor` or `bay doctor`
 
 ## Session feels slow or huge
 
@@ -46,8 +48,8 @@
 ## Still stuck
 
 ```bash
-codebase doctor
-codebase version
+bay doctor
+bay version
 ```
 
 Open a GitHub issue with OS, Node version, provider, and the command that failed (redact keys).

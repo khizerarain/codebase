@@ -22,7 +22,7 @@ export function runStartupDiagnostics(
     checks.push({
       ok: false,
       level: "error",
-      message: `Node.js ${process.versions.node} detected — Codebase needs Node 20+`,
+      message: `Node.js ${process.versions.node} detected — Bay needs Node 20+`,
     });
   } else {
     checks.push({
@@ -93,7 +93,7 @@ export function printStartupDiagnostics(
   const warns = checks.filter((c) => c.level === "warn");
 
   if (opts.verbose || errors.length || warns.length) {
-    logger.dim(`  codebase ${APP_VERSION} · startup checks`);
+    logger.dim(`  bay ${APP_VERSION} · startup checks`);
     for (const c of checks) {
       if (c.level === "error") logger.error(c.message);
       else if (c.level === "warn") logger.warn(c.message);

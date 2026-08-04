@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { ENV_VERBOSE, LEGACY_ENV_VERBOSE } from "../brand.js";
 
 let enabled = false;
 
@@ -7,7 +8,11 @@ export function setVerbose(on: boolean): void {
 }
 
 export function isVerbose(): boolean {
-  return enabled || process.env.CODEBASE_VERBOSE === "1";
+  return (
+    enabled ||
+    process.env[ENV_VERBOSE] === "1" ||
+    process.env[LEGACY_ENV_VERBOSE] === "1"
+  );
 }
 
 export function verboseLog(message: string): void {

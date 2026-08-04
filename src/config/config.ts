@@ -2,6 +2,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
+import {
+  APP_DISPLAY_NAME,
+  DATA_DIR_NAME,
+  ENV_HOME,
+  ENV_PROVIDER,
+  LEGACY_DATA_DIR_NAME,
+  LEGACY_ENV_HOME,
+  LEGACY_ENV_PROVIDER,
+  LOCAL_DATA_DIR_NAME,
+} from "../brand.js";
 
 export const ConfigSchema = z.object({
   provider: z.enum(["openrouter", "ollama"]).default("openrouter"),
@@ -26,7 +36,7 @@ export const ConfigSchema = z.object({
   exportDir: z.string().optional(),
   defaultVehicleId: z.string().optional(),
   recoverLastSession: z.boolean().default(true),
-  /** Extra timing/debug logs (also CODEBASE_VERBOSE=1). */
+  /** Extra timing/debug logs (also BAY_VERBOSE=1). */
   verbose: z.boolean().default(false),
   /** Soft cap for long-term memory facts before prune. */
   maxMemoryFacts: z.number().int().positive().default(200),
@@ -86,15 +96,26 @@ export interface DataPaths {
   garagePrefsFile: string;
 }
 
-/** Resolve ~/.codebase (or CODEBASE_HOME / project .codebase). */
+/**
+ * Resolve Bay data root.
+ * Prefer BAY_HOME / .bay; honor legacy CODEBASE_HOME / .codebase so existing data is not lost.
+ */
 export function resolveDataRoot(override?: string): string {
   if (override) return override;
-  if (process.env.CODEBASE_HOME) return process.env.CODEBASE_HOME;
+  if (process.env[ENV_HOME]) return process.env[ENV_HOME]!;
+  if (process.env[LEGACY_ENV_HOME]) return process.env[LEGACY_ENV_HOME]!;
 
-  const local = join(process.cwd(), ".codebase");
-  if (existsSync(local)) return local;
+  const localBay = join(process.cwd(), LOCAL_DATA_DIR_NAME);
+  if (existsSync(localBay)) return localBay;
+  const localLegacy = join(process.cwd(), LEGACY_DATA_DIR_NAME);
+  if (existsSync(localLegacy)) return localLegacy;
 
-  return join(homedir(), ".codebase");
+  const homeBay = join(homedir(), DATA_DIR_NAME);
+  if (existsSync(homeBay)) return homeBay;
+  const homeLegacy = join(homedir(), LEGACY_DATA_DIR_NAME);
+  if (existsSync(homeLegacy)) return homeLegacy;
+
+  return homeBay;
 }
 
 export function getDataPaths(root?: string, exportDirOverride?: string): DataPaths {
@@ -155,7 +176,7 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
       [
         "# Local mods",
         "",
-        "Drop a folder here with `mod.json` to extend Codebase locally.",
+        `Drop a folder here with \`mod.json\` to extend ${APP_DISPLAY_NAME} locally.`,
         "See project README → Phase 8 mods. No remote marketplace; no code execution.",
         "",
       ].join("\n"),
@@ -227,7 +248,8 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
 }
 
 function loadEnvIntoConfig(partial: Record<string, unknown>): Record<string, unknown> {
-  const provider = process.env.CODEBASE_PROVIDER as Config["provider"] | undefined;
+  const provider = (process.env[ENV_PROVIDER] ??
+    process.env[LEGACY_ENV_PROVIDER]) as Config["provider"] | undefined;
   const next = { ...partial };
 
   if (provider) next.provider = provider;
@@ -250,8 +272,9 @@ function loadEnvIntoConfig(partial: Record<string, unknown>): Record<string, unk
     ...(process.env.OLLAMA_MODEL ? { model: process.env.OLLAMA_MODEL } : {}),
   };
 
-  if (process.env.CODEBASE_HOME) {
-    next.dataDir = process.env.CODEBASE_HOME;
+  const home = process.env[ENV_HOME] ?? process.env[LEGACY_ENV_HOME];
+  if (home) {
+    next.dataDir = home;
   }
 
   return next;
@@ -286,7 +309,7 @@ export function saveConfig(config: Config, paths: DataPaths = getDataPaths()): v
 
 export function formatConfigForDisplay(config: Config, paths: DataPaths): string {
   return [
-    "Codebase config",
+    `${APP_DISPLAY_NAME} config`,
     "───────────────",
     `provider:           ${config.provider}`,
     `openrouter.model:   ${config.openrouter.model}`,

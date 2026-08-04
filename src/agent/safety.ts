@@ -26,9 +26,9 @@ export const SAFETY_SYSTEM_BLOCK = `
 `.trim();
 
 export const SAFETY_HELP = `
-Codebase Safety & Limitations
-─────────────────────────────
-Codebase is a local decision-support agent — not a certified mechanic, not a diagnostic scan tool,
+Bay Safety & Limitations
+────────────────────────
+Bay is a local decision-support agent — not a certified mechanic, not a diagnostic scan tool,
 and not a substitute for OEM service procedures.
 
 What it will do

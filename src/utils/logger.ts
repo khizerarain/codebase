@@ -1,7 +1,8 @@
 import chalk from "chalk";
+import { APP_DISPLAY_NAME, APP_TAGLINE } from "../brand.js";
 import { formatSafetyForTerminal } from "../agent/safety.js";
 
-/** Soft terminal logger with consistent Codebase styling. */
+/** Soft terminal logger with consistent Bay styling. */
 export const logger = {
   info(message: string): void {
     console.log(chalk.cyan("ℹ"), message);
@@ -35,7 +36,7 @@ export const logger = {
 
   agent(message: string): void {
     console.log();
-    console.log(chalk.bold.white("Codebase"), chalk.dim("›"));
+    console.log(chalk.bold.white(APP_DISPLAY_NAME), chalk.dim("›"));
     console.log(formatSafetyForTerminal(wrapLongLines(message, 100)));
     console.log();
   },
@@ -51,12 +52,9 @@ export const logger = {
 
   banner(): void {
     console.log();
+    console.log(chalk.bold.white(`  ${APP_DISPLAY_NAME}`), chalk.dim(`— ${APP_TAGLINE}`));
     console.log(
-      chalk.bold.white("  Codebase"),
-      chalk.dim("— terminal-first AI vehicle agent"),
-    );
-    console.log(
-      chalk.dim("  Taste-aware · local-first · private · /help · /about"),
+      chalk.dim("  Taste-aware · local-first · private · /help · /about · /quick"),
     );
     console.log();
   },

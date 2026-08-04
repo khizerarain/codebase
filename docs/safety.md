@@ -1,6 +1,6 @@
 # Safety & limitations
 
-Codebase is a **local decision-support agent**. It is not:
+Bay is a **local decision-support agent**. It is not:
 
 - a certified mechanic
 - a diagnostic scan tool

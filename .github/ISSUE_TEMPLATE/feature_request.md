@@ -15,7 +15,7 @@ labels: enhancement
 
 ## Scope check
 
-Codebase stays **local-first**. Please confirm this does **not** require:
+Bay stays **local-first**. Please confirm this does **not** require:
 
 - [ ] Cloud sync / accounts
 - [ ] Payments

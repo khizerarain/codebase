@@ -9,7 +9,7 @@ import { SESSION_HELP } from "../src/agent/prompts.js";
 
 describe("Phase 9 release readiness", () => {
   it("exposes a semver-ish version and about text", () => {
-    expect(APP_NAME).toBe("codebase");
+    expect(APP_NAME).toBe("bay");
     expect(APP_VERSION).toMatch(/^\d+\.\d+\.\d+/);
     expect(formatVersionLine()).toContain(APP_VERSION);
     expect(formatAbout()).toMatch(/local-first|Privacy|Safety/i);
@@ -20,8 +20,8 @@ describe("Phase 9 release readiness", () => {
     expect(SESSION_HELP).toContain("/about");
     expect(SESSION_HELP).toContain("/ownership");
     expect(SESSION_HELP).toContain("/report");
-    expect(SESSION_HELP).toContain("/mods");
     expect(SESSION_HELP).toContain("/doctor");
+    expect(SESSION_HELP).toContain("/diagnose");
   });
 
   it("startup diagnostics pass on a writable temp data dir", () => {

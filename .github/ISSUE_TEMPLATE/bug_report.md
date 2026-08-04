@@ -1,6 +1,6 @@
 ---
 name: Bug report
-about: Something broken or unexpected in Codebase
+about: Something broken or unexpected in Bay
 title: "[bug] "
 labels: bug
 ---
@@ -23,7 +23,7 @@ labels: bug
 
 - OS:
 - Node (`node -v`):
-- Codebase (`codebase version`):
+- Bay (`bay version`):
 - Provider (openrouter / ollama):
 - Install method (pnpm link / npm link / other):
 
@@ -33,4 +33,4 @@ labels: bug
 
 ## Notes
 
-- Run `codebase doctor` if relevant and paste a redacted summary.
+- Run `bay doctor` if relevant and paste a redacted summary.

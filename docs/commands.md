@@ -1,6 +1,8 @@
 # Command overview
 
-Type `/help` in a chat session for the live list.
+Product: **Bay** · CLI: `bay` · In-session: type `/help` for the live list.
+
+Launch essentials: `/vehicles add` · `/diagnose` · `/service` · `/garage` · `/taste` · `/obd connect mock` · `/report ownership` · `/quick`
 
 ## Taste & learning
 
@@ -80,7 +82,7 @@ See [automation.md](./automation.md).
 
 Config: `interaction.mode`, `interaction.verbosity`, `interaction.aliases`, `interaction.input`, `interaction.voiceEnabled`.
 
-Start with garage mode: `codebase chat --garage`. See [interaction.md](./interaction.md).
+Start with garage mode: `bay chat --garage`. See [interaction.md](./interaction.md).
 
 ## Ownership & reports
 

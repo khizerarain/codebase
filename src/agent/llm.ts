@@ -91,7 +91,7 @@ export class OpenRouterProvider implements LLMProvider {
   async chat(messages: ChatMessage[], tools?: ToolDefinition[]): Promise<LLMResponse> {
     if (!this.apiKey) {
       throw new Error(
-        "OPENROUTER_API_KEY is not set. Set it in your environment or switch to Ollama with CODEBASE_PROVIDER=ollama.",
+        "OPENROUTER_API_KEY is not set. Set it in your environment or switch to Ollama with BAY_PROVIDER=ollama.",
       );
     }
 
@@ -109,8 +109,8 @@ export class OpenRouterProvider implements LLMProvider {
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/codebase-cli/codebase",
-        "X-Title": "Codebase",
+        "HTTP-Referer": "https://github.com/khizerarain/codebase",
+        "X-Title": "Bay",
       },
       body: JSON.stringify(body),
     });

@@ -8,7 +8,7 @@ Phase 10 adds a **hardware-agnostic** live data layer. The product works fully w
 CLI / Agent / Diagnostics
         │
         ▼
-   ObdManager  ──► ObdStore (~/.codebase/obd/)
+   ObdManager  ──► ObdStore (~/.bay/obd/)
         │
         ▼
  VehicleDataProvider
@@ -51,7 +51,7 @@ Serial skeleton (not fully wired — no native serial dependency yet):
 
 ## Storage
 
-Under `~/.codebase/obd/`:
+Under `~/.bay/obd/` (or your active data root):
 
 - `snapshots/` — freeze-style captures
 - `sessions/` — short live monitor sessions

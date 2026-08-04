@@ -1,12 +1,22 @@
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  APP_DISPLAY_NAME,
+  APP_NAME,
+  APP_PITCH,
+  APP_TAGLINE,
+  APP_VALUE_PROPS,
+  DATA_DIR_NAME,
+  ENV_HOME,
+  PUBLIC_SAFETY_BLURB,
+  REPO_URL,
+} from "./brand.js";
 
 const require = createRequire(import.meta.url);
 
 function readPackageVersion(): string {
   try {
-    // Prefer dist-adjacent package.json when installed; fall back to repo root.
     const here = dirname(fileURLToPath(import.meta.url));
     const candidates = [
       join(here, "..", "package.json"),
@@ -23,10 +33,10 @@ function readPackageVersion(): string {
   } catch {
     // ignore
   }
-  return "0.12.0";
+  return "0.14.0";
 }
 
-export const APP_NAME = "codebase";
+export { APP_NAME, APP_DISPLAY_NAME, APP_TAGLINE };
 export const APP_VERSION = readPackageVersion();
 
 export function formatVersionLine(): string {
@@ -35,29 +45,28 @@ export function formatVersionLine(): string {
 
 export function formatAbout(): string {
   return [
-    "Codebase — terminal-first AI vehicle agent",
+    `${APP_DISPLAY_NAME} — ${APP_TAGLINE}`,
     "─────────────────────────────────────────",
     `Version:     ${APP_VERSION}`,
     "License:     MIT",
-    "Repository:  https://github.com/khizerarain/codebase",
+    `Repository:  ${REPO_URL}`,
     "",
     "What it is",
-    "  A local-first garage intelligence CLI that learns your vehicle taste,",
-    "  plans maintenance, supports diagnosis, and keeps ownership data private.",
+    `  ${APP_PITCH}`,
     "",
-    "Who it is for",
-    "  DIY owners, multi-vehicle households, and anyone who wants decision",
-    "  support without cloud accounts or a web dashboard.",
+    "Why it's different",
+    ...APP_VALUE_PROPS.map((v) => `  • ${v}`),
     "",
     "Privacy",
     "  No accounts · no cloud sync · no telemetry",
-    "  Data lives in ~/.codebase (or CODEBASE_HOME / project .codebase)",
+    `  Data lives in ~/${DATA_DIR_NAME} (or ${ENV_HOME} / project .bay)`,
     "",
     "Safety",
-    "  Decision-support only — not a certified mechanic. See /safety",
+    `  ${PUBLIC_SAFETY_BLURB}`,
+    "  See /safety",
     "",
     "Docs",
-    "  README · docs/install.md · docs/commands.md · docs/interaction.md",
+    "  README · docs/install.md · docs/launch.md · docs/commands.md",
     "",
     "Commands: /help · /version · /status · /doctor · /config",
   ].join("\n");

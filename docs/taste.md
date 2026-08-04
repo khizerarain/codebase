@@ -2,13 +2,13 @@
 
 ## Taste
 
-Codebase learns **how you like vehicle work done** from:
+Bay learns **how you like vehicle work done** from:
 
 1. **Accept** — Enter after an answer, or `/accept`
 2. **Reject** — `/reject [reason]`
 3. **Edit** — `/edit` (opens `$EDITOR` / `EDITOR`)
 
-Signals are stored under `~/.codebase/taste/`. The living summary is `taste.md` (`/taste edit`).
+Signals are stored under `~/.bay/taste/` (or your active data root). The living summary is `taste.md` (`/taste edit`).
 
 Taste influences DIY vs shop bias, OEM vs budget parts, risk tone, and schedule recommendations.
 

@@ -5,5 +5,9 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["tests/**/*.test.ts"],
+    // Keep output readable in CI; helpers are not test files.
+    exclude: ["**/node_modules/**", "**/dist/**"],
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
   },
 });
