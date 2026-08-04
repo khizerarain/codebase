@@ -71,10 +71,11 @@ export function computeMaintenanceItems(
       .sort((a, c) => c.mileage - a.mileage)[0];
 
     const baseMiles = lastService?.mileage ?? 0;
+    // No history: first due at intervalMiles (so high-mileage vehicles without logs surface as overdue)
     const dueAtMiles =
       lastService != null
         ? baseMiles + b.intervalMiles
-        : Math.floor(miles / b.intervalMiles) * b.intervalMiles + b.intervalMiles;
+        : b.intervalMiles;
 
     const remaining = dueAtMiles - miles;
     let status: MaintenanceItem["status"] = "ok";

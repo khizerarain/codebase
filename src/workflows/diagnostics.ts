@@ -5,6 +5,7 @@ import { z } from "zod";
 import { withSafetyFooter, assessRisk } from "../agent/safety.js";
 import type { DataPaths } from "../config/config.js";
 import type { KnowledgeBase } from "../knowledge/knowledge.js";
+import type { LiveDataContext } from "../obd/types.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { Vehicle } from "../vehicles/vehicles.js";
 
@@ -42,12 +43,18 @@ export type DiagnosticStep =
 /** Structured multi-step diagnostic workflow (suggestions only). */
 export class DiagnosticWorkflow {
   private session: DiagnosticSession | null = null;
+  private liveProvider: (() => Promise<LiveDataContext | null>) | null = null;
 
   constructor(
     private readonly paths: DataPaths,
     private readonly taste: TasteManager,
     private readonly knowledge?: KnowledgeBase,
   ) {}
+
+  /** Optional hook so finalize can pull OBD snapshot/DTCs when connected. */
+  setLiveDataProvider(fn: (() => Promise<LiveDataContext | null>) | null): void {
+    this.liveProvider = fn;
+  }
 
   getSession(): DiagnosticSession | null {
     return this.session;
@@ -61,7 +68,7 @@ export class DiagnosticWorkflow {
     this.session = null;
   }
 
-  start(input: string, vehicle?: Vehicle): DiagnosticStep {
+  async start(input: string, vehicle?: Vehicle): Promise<DiagnosticStep> {
     const symptoms = parseSymptoms(input);
     if (!symptoms.length) {
       symptoms.push(input.trim() || "unspecified concern");
@@ -79,7 +86,7 @@ export class DiagnosticWorkflow {
     };
 
     if (!questions.length) {
-      return this.finalize(vehicle);
+      return this.finalizeAsync(vehicle);
     }
 
     const content = [
@@ -99,7 +106,7 @@ export class DiagnosticWorkflow {
   }
 
   /** Feed free-text answers while collecting. */
-  continueWith(answer: string, vehicle?: Vehicle): DiagnosticStep {
+  async continueWith(answer: string, vehicle?: Vehicle): Promise<DiagnosticStep> {
     if (!this.session || this.session.status !== "collecting") {
       return this.start(answer, vehicle);
     }
@@ -122,7 +129,7 @@ export class DiagnosticWorkflow {
     }
 
     if (/^(done|skip|go|report)$/i.test(text)) {
-      return this.finalize(vehicle);
+      return this.finalizeAsync(vehicle);
     }
 
     // Map answer onto next pending question or store as freeform
@@ -140,7 +147,7 @@ export class DiagnosticWorkflow {
     }
 
     if (this.session.pendingQuestions.length === 0) {
-      return this.finalize(vehicle);
+      return this.finalizeAsync(vehicle);
     }
 
     const content = [
@@ -153,7 +160,26 @@ export class DiagnosticWorkflow {
     return { type: "questions", content, session: this.session };
   }
 
-  private finalize(vehicle?: Vehicle): DiagnosticStep {
+  /** Prefer this when OBD may be connected (async live pull). */
+  async finalizeAsync(vehicle?: Vehicle): Promise<DiagnosticStep> {
+    if (!this.session) {
+      throw new Error("No diagnostic session");
+    }
+    let live: LiveDataContext | null = null;
+    if (this.liveProvider) {
+      try {
+        live = await this.liveProvider();
+      } catch {
+        live = null;
+      }
+    }
+    return this.finalizeWithLive(vehicle, live);
+  }
+
+  private finalizeWithLive(
+    vehicle: Vehicle | undefined,
+    live: LiveDataContext | null,
+  ): DiagnosticStep {
     if (!this.session) {
       throw new Error("No diagnostic session");
     }
@@ -163,10 +189,22 @@ export class DiagnosticWorkflow {
       .listSkills()
       .slice(0, 6)
       .map((s) => s.slug);
+
+    // Fold DTC text into answers so ranking can see codes
+    if (live?.connected && live.dtcs.length) {
+      this.session.answers["Live DTCs"] = live.dtcs.join(", ");
+      for (const code of live.dtcs) {
+        if (!this.session.symptoms.includes(code)) {
+          this.session.symptoms.push(`code ${code}`);
+        }
+      }
+    }
+
     const causes = rankCauses(this.session.symptoms, this.session.answers, {
       taste,
       skills,
       fuelType: vehicle?.fuelType,
+      dtcs: live?.dtcs ?? [],
     });
 
     let knowledgeNote = "";
@@ -194,6 +232,7 @@ export class DiagnosticWorkflow {
       taste,
       skills,
       knowledgeNote,
+      live,
     });
 
     this.session.status = "complete";
@@ -260,14 +299,49 @@ function buildClarifyingQuestions(
 function rankCauses(
   symptoms: string[],
   answers: Record<string, string>,
-  ctx: { taste: string; skills: string[]; fuelType?: string },
+  ctx: {
+    taste: string;
+    skills: string[];
+    fuelType?: string;
+    dtcs?: string[];
+  },
 ): RankedCause[] {
-  const joined = `${symptoms.join(" ")} ${Object.values(answers).join(" ")}`.toLowerCase();
+  const dtcJoined = (ctx.dtcs ?? []).join(" ").toLowerCase();
+  const joined =
+    `${symptoms.join(" ")} ${Object.values(answers).join(" ")} ${dtcJoined}`.toLowerCase();
   const diy = /diy/.test(ctx.taste) || ctx.skills.includes("diy-first");
   const budget = /budget/.test(ctx.taste) || ctx.skills.includes("budget-conscious");
   const causes: RankedCause[] = [];
 
   const push = (c: RankedCause) => causes.push(RankedCauseSchema.parse(c));
+
+  if (/p0420/.test(joined)) {
+    push({
+      cause: "Catalytic converter efficiency / related exhaust sensors",
+      probability: "high",
+      severity: 3,
+      costBand: "$$$",
+      diyDifficulty: 4,
+      checks: [
+        "Confirm P0420 with freeze-frame",
+        "Inspect for exhaust leaks upstream",
+        "Review fuel trim / O2 activity before replacing catalyst",
+      ],
+      why: "Live/logged P0420 elevates catalyst-efficiency hypotheses — still verify, do not parts-cannon.",
+    });
+  }
+
+  if (/p0171/.test(joined)) {
+    push({
+      cause: "Lean condition (vacuum leak / MAF / fuel delivery)",
+      probability: "high",
+      severity: 3,
+      costBand: "$$",
+      diyDifficulty: diy ? 2 : 3,
+      checks: ["Fuel trims", "Smoke/vacuum inspection", "MAF cleanliness"],
+      why: "P0171 points at unmetered air or fueling shortfall; live codes sharpen this lead.",
+    });
+  }
 
   if (/brake|squeal|grind|pedal/.test(joined)) {
     push({
@@ -370,8 +444,11 @@ function formatDiagnosticReport(input: {
   taste: string;
   skills: string[];
   knowledgeNote: string;
+  live?: LiveDataContext | null;
 }): string {
-  const risk = assessRisk(input.symptoms.join(" "));
+  const risk = assessRisk(
+    `${input.symptoms.join(" ")} ${(input.live?.dtcs ?? []).join(" ")}`,
+  );
   const vline = input.vehicle
     ? `${input.vehicle.year} ${input.vehicle.make} ${input.vehicle.model} · ${input.vehicle.currentMileage.toLocaleString()} mi`
     : "Unspecified vehicle";
@@ -398,7 +475,37 @@ function formatDiagnosticReport(input: {
     risk === "high"
       ? "Safety-critical systems involved — prefer professional inspection before continued driving if unsure."
       : "Re-test after each change so you know what actually fixed it.",
+    input.live?.connected
+      ? "Live OBD values/DTCs were included — still verify with OEM procedures before torque-critical or safety work."
+      : "No live OBD connection — consider `/obd connect mock` (or a real adapter later) to enrich the next pass.",
   ];
+
+  const liveBlock =
+    input.live?.connected && input.live.snapshot
+      ? [
+          "",
+          "## Live OBD data (assistive)",
+          `Provider: ${input.live.providerId}`,
+          `Captured: ${input.live.snapshot.capturedAt}`,
+          "",
+          "Key values:",
+          ...Object.entries(input.live.snapshot.values)
+            .slice(0, 12)
+            .map(([k, v]) => `- ${k}: ${v}`),
+          "",
+          "DTCs:",
+          ...(input.live.dtcs.length
+            ? input.live.dtcs.map((c) => `- ${c}`)
+            : ["- (none)"]),
+          "",
+          "Range hints:",
+          ...(input.live.rangeNotes.length
+            ? input.live.rangeNotes.map((n) => `- ${n}`)
+            : ["- (none)"]),
+          "",
+          "> Live telemetry assists reasoning — it is not a certified diagnosis or freeze-frame from OEM tooling.",
+        ]
+      : ["", "## Live OBD data", "- Not connected (optional). Use `/obd connect mock` to demo."];
 
   const body = [
     "# Diagnostic report (suggestions, not a certified diagnosis)",
@@ -411,6 +518,7 @@ function formatDiagnosticReport(input: {
     "",
     "## Clarifying answers",
     ...(answerLines.length ? answerLines : ["- (none provided)"]),
+    ...liveBlock,
     "",
     "## Possible causes (ranked)",
     "These are hypotheses ranked by probability, severity, cost band, and DIY difficulty — not certainty.",

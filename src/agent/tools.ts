@@ -12,6 +12,7 @@ import type { DataPaths } from "../config/config.js";
 import type { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { LongTermMemory } from "../memory/longterm.js";
 import type { ModRegistry } from "../mods/registry.js";
+import type { ObdManager } from "../obd/manager.js";
 import { OwnershipEngine } from "../ownership/engine.js";
 import type { TasteManager } from "../taste/taste.js";
 import type { VehicleStore } from "../vehicles/vehicles.js";
@@ -45,6 +46,7 @@ export interface ToolContext {
   knowledge?: KnowledgeBase;
   longTerm?: LongTermMemory;
   mods?: ModRegistry;
+  obd?: ObdManager;
 }
 
 const SearchWebSchema = z.object({ query: z.string().min(1) });
@@ -307,6 +309,20 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       required: ["name"],
     },
   },
+  {
+    name: "obd_live",
+    description:
+      "Read local OBD live context (snapshot/DTCs/range hints) if a provider is connected. Mock or serial skeleton.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["status", "snapshot", "dtc"],
+        },
+      },
+    },
+  },
 ];
 
 export async function executeTool(
@@ -438,6 +454,25 @@ export async function executeTool(
           };
         }
         return { name, ok: true, output: out };
+      }
+      case "obd_live": {
+        if (!ctx.obd) {
+          return { name, ok: false, output: "OBD manager not available." };
+        }
+        const action =
+          typeof args.action === "string" ? args.action : "status";
+        if (action === "snapshot") {
+          const { markdown } = await ctx.obd.snapshot(false);
+          return { name, ok: true, output: markdown };
+        }
+        if (action === "dtc") {
+          return {
+            name,
+            ok: true,
+            output: await ctx.obd.dtc({ attachHistory: false }),
+          };
+        }
+        return { name, ok: true, output: await ctx.obd.status() };
       }
       default:
         return { name, ok: false, output: `Unknown tool: ${name}` };

@@ -23,7 +23,7 @@ function readPackageVersion(): string {
   } catch {
     // ignore
   }
-  return "0.9.0";
+  return "0.12.0";
 }
 
 export const APP_NAME = "codebase";
@@ -57,7 +57,7 @@ export function formatAbout(): string {
     "  Decision-support only — not a certified mechanic. See /safety",
     "",
     "Docs",
-    "  README · docs/install.md · docs/commands.md · docs/troubleshooting.md",
+    "  README · docs/install.md · docs/commands.md · docs/interaction.md",
     "",
     "Commands: /help · /version · /status · /doctor · /config",
   ].join("\n");

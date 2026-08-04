@@ -12,7 +12,24 @@ export interface PromptContext {
   approvedPlan?: string;
   /** Optional scored extras (service history, knowledge, garage focus). */
   extraContext?: string;
+  /** Phase 12 interaction style */
+  interactionMode?: "normal" | "garage";
+  verbosity?: "short" | "normal" | "detailed";
 }
+
+export const GARAGE_MODE_BLOCK = `
+## Interaction: GARAGE MODE
+- Keep answers short and checklist-oriented.
+- Lead with Action / next steps; keep Suggestion brief.
+- Prefer bullets over paragraphs. Skip conversational filler.
+- Still enforce safety language for high-risk systems — never drop disclaimers.
+- Offer one clear confirm path (e.g. /approve, /log, /diagnose).
+`.trim();
+
+export const NORMAL_MODE_BLOCK = `
+## Interaction: NORMAL MODE
+- Be practical and concise; expand when the user asks for detail.
+`.trim();
 
 export function buildSystemPrompt(ctx: PromptContext): string {
   return [
@@ -28,6 +45,13 @@ export function buildSystemPrompt(ctx: PromptContext): string {
     "Do not invent torque specs, part numbers, or TSBs. If unsure, say so and suggest verification.",
     "",
     SAFETY_SYSTEM_BLOCK,
+    "",
+    ctx.interactionMode === "garage" ? GARAGE_MODE_BLOCK : NORMAL_MODE_BLOCK,
+    ctx.verbosity === "short"
+      ? "Verbosity: SHORT — minimize prose; checklists and next actions first."
+      : ctx.verbosity === "detailed"
+        ? "Verbosity: DETAILED — include more reasoning when helpful; still stay structured."
+        : "",
     "",
     ctx.mode ? `## Current Mode\n${ctx.mode}` : "",
     "",
@@ -104,7 +128,7 @@ Vehicles
   /history              Service history
 
 Service intelligence
-  /diagnose <symptoms>  Structured multi-step diagnosis
+  /diagnose <symptoms>  Structured multi-step diagnosis (+ live OBD if connected)
   /service <job>        Full service/repair plan (parts/tools/steps)
   /prep <job>           Parts + tools staging checklist
   /log <desc> [mi] [$] [diy|shop]
@@ -112,6 +136,22 @@ Service intelligence
   /inspect [pre-purchase|periodic]
   /schedule             Full maintenance schedule table
   /parts [part]         OEM vs aftermarket research
+
+Live OBD (mock-first)
+  /obd connect [mock|serial] [scenario]
+  /obd status|snapshot|dtc|monitor|trends|disconnect
+
+Automation (local watchdogs)
+  /watchdogs list|enable|disable|run|briefing
+  /watchdogs dismiss <id> [days] · clear-dismissals · history
+
+Speed / garage
+  /mode garage|normal   Hands-busy shorter output
+  /quick                Rapid action menu
+  /pretrip              Pre-trip checklist + due
+  /aliases              Short command aliases (/d /g /snap …)
+  /lv                   Switch to last vehicle
+  /interpret            Quick OBD snapshot + codes
 
 Ownership & reports
   /ownership [/costs]   Cost/mi, health, predictions (add garage)
@@ -156,6 +196,8 @@ Tips
   • Non-trivial work opens Plan → /approve → execute
   • Reports → exports/reports/ · mods are declarative (no remote code)
   • Install issues: docs/troubleshooting.md · outside chat: codebase doctor
+  • OBD mock: /obd connect mock · docs/obd.md (no hardware required)
+  • Quiet by default: /watchdogs · automation.assertiveness quiet|normal|assertive
 `.trim();
 
 /** Heuristic: non-trivial work should enter planning mode. */

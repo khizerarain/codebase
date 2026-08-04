@@ -32,6 +32,36 @@ export const ConfigSchema = z.object({
   maxMemoryFacts: z.number().int().positive().default(200),
   /** TTL for taste/knowledge context cache (ms). */
   contextCacheTtlMs: z.number().int().positive().default(30_000),
+  /** OBD / live vehicle data (local adapters; mock by default). */
+  obd: z
+    .object({
+      provider: z.enum(["mock", "serial"]).default("mock"),
+      /** Serial port path (COM3, /dev/ttyUSB0, …) */
+      port: z.string().optional(),
+      /** Alias accepted for clarity in docs */
+      serialPort: z.string().optional(),
+      baudRate: z.number().int().positive().default(38400),
+    })
+    .default({}),
+  /** Local watchdogs / proactive briefing (no daemon, no cloud). */
+  automation: z
+    .object({
+      briefingOnStart: z.boolean().default(true),
+      assertiveness: z.enum(["quiet", "normal", "assertive"]).default("quiet"),
+      maxBriefingAlerts: z.number().int().positive().default(3),
+    })
+    .default({}),
+  /** Interaction speed / garage mode / input sources (Phase 12). */
+  interaction: z
+    .object({
+      mode: z.enum(["normal", "garage"]).default("normal"),
+      verbosity: z.enum(["short", "normal", "detailed"]).default("normal"),
+      aliases: z.boolean().default(true),
+      voiceEnabled: z.boolean().default(false),
+      voiceEngine: z.enum(["none", "local"]).default("none"),
+      input: z.enum(["auto", "terminal", "piped", "voice"]).default("auto"),
+    })
+    .default({}),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -49,6 +79,8 @@ export interface DataPaths {
   reports: string;
   knowledge: string;
   mods: string;
+  obd: string;
+  automation: string;
   configFile: string;
   tasteFile: string;
   garagePrefsFile: string;
@@ -83,6 +115,8 @@ export function getDataPaths(root?: string, exportDirOverride?: string): DataPat
     ),
     knowledge: join(base, "knowledge"),
     mods: join(base, "mods"),
+    obd: join(base, "obd"),
+    automation: join(base, "automation"),
     configFile: join(base, "config.json"),
     tasteFile: join(base, "taste", "taste.md"),
     garagePrefsFile: join(base, "garage-preferences.json"),
@@ -105,6 +139,11 @@ export function ensureDataDirs(paths: DataPaths = getDataPaths()): DataPaths {
     paths.knowledge,
     join(paths.knowledge, "docs"),
     paths.mods,
+    paths.obd,
+    join(paths.obd, "snapshots"),
+    join(paths.obd, "sessions"),
+    join(paths.obd, "dtc"),
+    paths.automation,
   ]) {
     mkdirSync(dir, { recursive: true });
   }
@@ -263,6 +302,17 @@ export function formatConfigForDisplay(config: Config, paths: DataPaths): string
     `verbose:            ${config.verbose}`,
     `maxMemoryFacts:     ${config.maxMemoryFacts}`,
     `contextCacheTtlMs:  ${config.contextCacheTtlMs}`,
+    `obd.provider:       ${config.obd.provider}`,
+    `obd.port:           ${config.obd.port ?? config.obd.serialPort ?? "(unset)"}`,
+    `obd.baudRate:       ${config.obd.baudRate}`,
+    `automation.briefingOnStart: ${config.automation.briefingOnStart}`,
+    `automation.assertiveness:   ${config.automation.assertiveness}`,
+    `automation.maxBriefingAlerts:${config.automation.maxBriefingAlerts}`,
+    `interaction.mode:   ${config.interaction.mode}`,
+    `interaction.verbosity: ${config.interaction.verbosity}`,
+    `interaction.aliases: ${config.interaction.aliases}`,
+    `interaction.voiceEnabled: ${config.interaction.voiceEnabled}`,
+    `interaction.input:  ${config.interaction.input}`,
     `dataDir:            ${paths.root}`,
     `configFile:         ${paths.configFile}`,
     "",
@@ -270,7 +320,12 @@ export function formatConfigForDisplay(config: Config, paths: DataPaths): string
     "Keys: provider | openrouter.model | ollama.model | ollama.baseUrl |",
     "      exportFormat | exportDir | defaultVehicleId | toolRetries |",
     "      maxToolRounds | contextMessageLimit | recoverLastSession |",
-    "      verbose | maxMemoryFacts | contextCacheTtlMs",
+    "      verbose | maxMemoryFacts | contextCacheTtlMs |",
+    "      obd.provider | obd.port | obd.baudRate |",
+    "      automation.briefingOnStart | automation.assertiveness |",
+    "      automation.maxBriefingAlerts |",
+    "      interaction.mode | interaction.verbosity | interaction.aliases |",
+    "      interaction.voiceEnabled | interaction.input",
   ].join("\n");
 }
 
@@ -328,6 +383,61 @@ export function setConfigValue(
       break;
     case "contextCacheTtlMs":
       next.contextCacheTtlMs = Number(value);
+      break;
+    case "obd.provider":
+      if (value !== "mock" && value !== "serial") {
+        throw new Error("obd.provider must be mock or serial");
+      }
+      next.obd.provider = value;
+      break;
+    case "obd.port":
+    case "obd.serialPort":
+      next.obd.port = value === "null" || value === "none" ? undefined : value;
+      next.obd.serialPort = next.obd.port;
+      break;
+    case "obd.baudRate":
+      next.obd.baudRate = Number(value);
+      break;
+    case "automation.briefingOnStart":
+      next.automation.briefingOnStart = value === "true" || value === "1";
+      break;
+    case "automation.assertiveness":
+      if (value !== "quiet" && value !== "normal" && value !== "assertive") {
+        throw new Error("automation.assertiveness must be quiet|normal|assertive");
+      }
+      next.automation.assertiveness = value;
+      break;
+    case "automation.maxBriefingAlerts":
+      next.automation.maxBriefingAlerts = Number(value);
+      break;
+    case "interaction.mode":
+      if (value !== "normal" && value !== "garage") {
+        throw new Error("interaction.mode must be normal|garage");
+      }
+      next.interaction.mode = value;
+      break;
+    case "interaction.verbosity":
+      if (value !== "short" && value !== "normal" && value !== "detailed") {
+        throw new Error("interaction.verbosity must be short|normal|detailed");
+      }
+      next.interaction.verbosity = value;
+      break;
+    case "interaction.aliases":
+      next.interaction.aliases = value === "true" || value === "1";
+      break;
+    case "interaction.voiceEnabled":
+      next.interaction.voiceEnabled = value === "true" || value === "1";
+      break;
+    case "interaction.input":
+      if (
+        value !== "auto" &&
+        value !== "terminal" &&
+        value !== "piped" &&
+        value !== "voice"
+      ) {
+        throw new Error("interaction.input must be auto|terminal|piped|voice");
+      }
+      next.interaction.input = value;
       break;
     default:
       throw new Error(`Unknown config key: ${key}`);

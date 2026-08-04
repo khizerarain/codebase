@@ -1,6 +1,6 @@
 {
   "name": "codebase",
-  "version": "0.9.0",
+  "version": "0.12.0",
   "description": "Terminal-first, local-first AI vehicle agent that learns your personal vehicle taste",
   "type": "module",
   "bin": {

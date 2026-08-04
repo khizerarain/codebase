@@ -17,7 +17,7 @@ describe("Phase 6 workflows", () => {
     dirs.length = 0;
   });
 
-  it("runs structured diagnosis through questions to ranked report", () => {
+  it("runs structured diagnosis through questions to ranked report", async () => {
     const root = mkdtempSync(join(tmpdir(), "codebase-dx-"));
     dirs.push(root);
     const paths = ensureDataDirs(getDataPaths(root));
@@ -31,18 +31,18 @@ describe("Phase 6 workflows", () => {
     });
 
     const dx = new DiagnosticWorkflow(paths, taste);
-    const first = dx.start("squeal when braking", v);
+    const first = await dx.start("squeal when braking", v);
     expect(first.type).toBe("questions");
     expect(first.content).toMatch(/clarifying/i);
 
     let step = first;
     let guard = 0;
     while (step.type === "questions" && guard < 8) {
-      step = dx.continueWith("cold mornings, pedal feels normal", v);
+      step = await dx.continueWith("cold mornings, pedal feels normal", v);
       guard++;
     }
     if (step.type === "questions") {
-      step = dx.continueWith("done", v);
+      step = await dx.continueWith("done", v);
     }
     expect(step.type).toBe("report");
     expect(step.content).toMatch(/Possible causes/i);

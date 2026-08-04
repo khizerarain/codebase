@@ -73,6 +73,57 @@ done
 /report ownership
 ```
 
+### Live OBD (mock — no hardware required)
+
+```text
+/obd connect mock fault_catalyst
+/obd status
+/obd dtc
+/obd snapshot
+/obd monitor 8
+/diagnose rough idle and check engine light
+done
+/obd disconnect
+```
+
+Architecture, serial skeleton, and how to add a real ELM327 transport: [`docs/obd.md`](./docs/obd.md)
+
+### Proactive watchdogs (local, user-controlled)
+
+```text
+/watchdogs list
+/watchdogs run
+/watchdogs briefing
+/watchdogs dismiss <id>
+/config set automation.assertiveness quiet
+```
+
+Quiet by default. Optional garage briefing on session start. No daemon, no cloud push. Details: [`docs/automation.md`](./docs/automation.md)
+
+### Fast interaction & garage mode
+
+```text
+/mode garage          # shorter checklists, stronger next actions
+/quick                # rapid action menu
+/d brake squeal cold  # alias → /diagnose …
+/attn                 # what needs attention
+/snap                 # OBD snapshot (after /obd connect mock)
+/lv                   # switch back to last vehicle
+/pretrip              # due + walk-around checklist
+```
+
+```bash
+codebase chat --garage
+```
+
+```text
+/config set interaction.mode garage
+/config set interaction.verbosity short
+/aliases
+```
+
+Voice is optional and local-first (pluggable `InputProvider` — no cloud speech API). Details: [`docs/interaction.md`](./docs/interaction.md)
+
 Pre-purchase style support:
 
 ```text
@@ -88,6 +139,9 @@ Pre-purchase style support:
 | Taste | `/accept` `/reject` `/edit` `/taste` `/learn` `/skill` |
 | Garage | `/vehicles` `/garage` `/compare` `/insights` `/due` |
 | Service | `/diagnose` `/service` `/prep` `/log` `/schedule` `/parts` |
+| Live OBD | `/obd connect\|status\|snapshot\|dtc\|monitor\|disconnect` |
+| Automation | `/watchdogs list\|run\|enable\|disable\|dismiss` |
+| Speed | `/mode` `/quick` `/aliases` `/pretrip` `/lv` `/interpret` |
 | Ownership | `/ownership` `/health` `/report` `/decide` |
 | Extensibility | `/mods` `/knowledge` `/memory` |
 | System | `/help` `/version` `/about` `/status` `/doctor` `/config` `/safety` |
@@ -114,7 +168,7 @@ License: [MIT](./LICENSE)
 
 ## Version
 
-Current: **0.9.0** (Phase 9 — release hardening)
+Current: **0.12.0** (Phase 12 — garage mode, aliases, voice-ready input)
 
 ```bash
 codebase version

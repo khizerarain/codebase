@@ -23,12 +23,12 @@ export function createPhase6(paths: DataPaths, taste: TasteManager, agent: Agent
   };
 }
 
-export function handleDiagnoseCommand(
+export async function handleDiagnoseCommand(
   line: string,
   handlers: Phase6Handlers,
   vehicles: VehicleStore,
   agent: Agent,
-): "collecting" | "done" {
+): Promise<"collecting" | "done"> {
   const symptomsRaw = line.replace(/^\/diagnose\s*/, "").trim();
   const vehicle = vehicles.getActive();
 
@@ -46,7 +46,7 @@ export function handleDiagnoseCommand(
     return "done";
   }
 
-  const step = handlers.diagnostics.start(symptomsRaw, vehicle);
+  const step = await handlers.diagnostics.start(symptomsRaw, vehicle);
   if (step.type === "questions") {
     logger.section("Diagnosis");
     console.log(step.content + "\n");
@@ -59,13 +59,16 @@ export function handleDiagnoseCommand(
   return "done";
 }
 
-export function continueDiagnosis(
+export async function continueDiagnosis(
   answer: string,
   handlers: Phase6Handlers,
   vehicles: VehicleStore,
   agent: Agent,
-): "collecting" | "done" {
-  const step = handlers.diagnostics.continueWith(answer, vehicles.getActive());
+): Promise<"collecting" | "done"> {
+  const step = await handlers.diagnostics.continueWith(
+    answer,
+    vehicles.getActive(),
+  );
   if (step.session.id === "cancelled") {
     logger.info(step.content);
     return "done";

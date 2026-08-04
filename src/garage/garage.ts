@@ -24,7 +24,7 @@ export class GarageService {
       "",
       this.vehicles.formatList(activeId),
       "",
-      "Commands: /vehicles switch <id> · /compare <idA> <idB> · /insights · /history",
+      "Commands: /vehicles switch <id> · /compare <idA> <idB> · /insights · /watchdogs · /history",
     ];
     return lines.join("\n");
   }

@@ -2,8 +2,6 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import * as readline from "node:readline/promises";
-import { stdin as input, stdout as output } from "node:process";
 import chalk from "chalk";
 import { Command } from "commander";
 import ora from "ora";
@@ -12,6 +10,17 @@ import { createLLMProvider } from "./agent/llm.js";
 import { SESSION_HELP } from "./agent/prompts.js";
 import { SAFETY_HELP } from "./agent/safety.js";
 import { executeTool } from "./agent/tools.js";
+import { expandAlias, makeCompleter } from "./cli/aliases.js";
+import { CommandHistory, LastVehicleMemory } from "./cli/history.js";
+import {
+  handleAliasesCommand,
+  handleLastVehicle,
+  handleModeCommand,
+  handlePretrip,
+  handleQuickInterpret,
+  handleQuickMenu,
+  handleQuickSnap,
+} from "./cli/phase12.js";
 import {
   ensureDataDirs,
   formatConfigForDisplay,
@@ -21,6 +30,7 @@ import {
   setConfigValue,
   type Config,
 } from "./config/config.js";
+import { resolveInputProvider } from "./input/resolve.js";
 import {
   handleCompareCommand,
   handleGarageCommand,
@@ -57,6 +67,14 @@ import {
   handleReportCommand,
   tryModCommand,
 } from "./cli/phase8.js";
+import { createPhase10, handleObdCommand } from "./cli/phase10.js";
+import {
+  createPhase11,
+  handleWatchdogsCommand,
+  printStartupBriefing,
+} from "./cli/phase11.js";
+import type { Phase11Context } from "./cli/phase11.js";
+import { formatProactiveAppendix } from "./automation/format.js";
 import { printStartupDiagnostics } from "./cli/startup.js";
 import { formatDoctorReport, runDoctor } from "./data/doctor.js";
 import { LocalDataStore } from "./data/store.js";
@@ -98,8 +116,9 @@ export function buildProgram(): Command {
     .command("chat", { isDefault: true })
     .description("Start an interactive Codebase session")
     .option("--provider <provider>", "openrouter | ollama")
-    .action(async (opts: { provider?: string }) => {
-      await runChatSession(opts.provider);
+    .option("--garage", "Start in garage mode (short checklists)")
+    .action(async (opts: { provider?: string; garage?: boolean }) => {
+      await runChatSession(opts.provider, { garage: opts.garage });
     });
 
   program
@@ -192,7 +211,10 @@ export function buildProgram(): Command {
   return program;
 }
 
-async function runChatSession(providerOverride?: string): Promise<void> {
+async function runChatSession(
+  providerOverride?: string,
+  opts: { garage?: boolean } = {},
+): Promise<void> {
   let paths = ensureDataDirs(getDataPaths());
   let config = loadConfig(paths);
   if (config.exportDir) {
@@ -200,6 +222,9 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   }
   if (providerOverride === "openrouter" || providerOverride === "ollama") {
     config.provider = providerOverride;
+  }
+  if (opts.garage) {
+    config.interaction.mode = "garage";
   }
 
   const taste = new TasteManager(paths);
@@ -219,7 +244,18 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   const garage = new GarageService(vehicles, taste, paths);
   const phase6 = createPhase6(paths, taste, agent);
   const phase8 = createPhase8(paths, vehicles, taste, agent, garage);
+  const phase10 = createPhase10(paths, config, vehicles);
+  const phase11 = createPhase11(
+    paths,
+    config,
+    vehicles,
+    taste,
+    phase10.obd,
+    agent.knowledge,
+  );
+  phase6.diagnostics.setLiveDataProvider(() => phase10.obd.liveContext());
   agent.setMods(phase8.mods);
+  agent.setObd(phase10.obd);
   let diagnosing = false;
 
   // Smart default active vehicle when none / invalid pointer
@@ -262,9 +298,24 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   } else {
     logger.dim("No active vehicle yet — add one with /vehicles add …");
   }
-  logger.dim("Type a question, or /help · /about · /safety for guidance.\n");
+  if (config.interaction.mode === "garage") {
+    logger.info("Garage mode — short checklists · /mode normal to exit · /quick for menu");
+  } else {
+    logger.dim("Type a question, or /help · /quick · /aliases · /safety for guidance.\n");
+  }
 
-  const rl = readline.createInterface({ input, output, terminal: true });
+  if (!firstTime && vehicles.list().length > 0) {
+    await printStartupBriefing(phase11, config);
+  }
+
+  const cmdHistory = new CommandHistory(paths);
+  const lastVehicle = new LastVehicleMemory(paths);
+  const inputProvider = resolveInputProvider(config, {
+    history: cmdHistory.load(),
+    completer: makeCompleter(),
+  });
+  logger.dim(`  input: ${inputProvider.label}`);
+
   let pending: PendingAnswer | null = null;
   let running = true;
   let busy = false;
@@ -279,7 +330,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
     console.log();
     logger.info(busy ? "Interrupted. Session saved." : "Session saved. See you next wrench.");
-    rl.close();
+    void inputProvider.close?.();
   };
 
   process.on("SIGINT", () => {
@@ -294,8 +345,16 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   while (running) {
     let line: string;
     try {
-      line = (await rl.question(chalk.bold.green("you › "))).trim();
-    } catch {
+      const prompt =
+        config.interaction.mode === "garage"
+          ? chalk.bold.yellow("garage › ")
+          : chalk.bold.green("you › ");
+      line = (await inputProvider.getInput(prompt)).trim();
+    } catch (err) {
+      logger.warn(friendlyError(err));
+      if (inputProvider.id === "voice") {
+        logger.info("Voice unavailable — /config set interaction.input terminal");
+      }
       break;
     }
 
@@ -314,6 +373,9 @@ async function runChatSession(providerOverride?: string): Promise<void> {
       continue;
     }
 
+    line = expandAlias(line, config.interaction.aliases !== false);
+    cmdHistory.push(line);
+
     if (line === "/exit" || line === "/quit") {
       shutdown();
       break;
@@ -321,6 +383,45 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/help") {
       console.log("\n" + SESSION_HELP + "\n");
+      continue;
+    }
+
+    if (line === "/aliases") {
+      handleAliasesCommand();
+      continue;
+    }
+
+    if (line === "/quick" || line === "/q") {
+      // /q already expanded to /quick via alias when aliases on
+      handleQuickMenu();
+      continue;
+    }
+
+    if (line === "/mode" || line.startsWith("/mode ")) {
+      config = handleModeCommand(line, config, paths);
+      continue;
+    }
+
+    if (line === "/pretrip") {
+      await handlePretrip(vehicles, taste, agent);
+      continue;
+    }
+
+    if (line === "/interpret") {
+      await handleQuickInterpret(phase10, phase11, agent);
+      continue;
+    }
+
+    if (line === "/lv" || line === "/last") {
+      handleLastVehicle(vehicles, lastVehicle);
+      const v = vehicles.getActive();
+      if (v) memory.setActiveVehicle(v.id);
+      continue;
+    }
+
+    // /snap is alias → /obd snapshot; also allow bare rapid path if someone types it after expand
+    if (line === "/obd snapshot" || line === "/snap") {
+      await handleQuickSnap(phase10, agent);
       continue;
     }
 
@@ -382,11 +483,13 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/garage" || line.startsWith("/garage ")) {
       handleGarageCommand(line, garage, paths);
+      await printProactiveAppendix(phase11);
       continue;
     }
 
     if (line === "/insights") {
       handleInsights(garage);
+      await printProactiveAppendix(phase11);
       continue;
     }
 
@@ -407,6 +510,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/status" || line === "/info") {
       handleStatusCommand(agent.data);
+      await printProactiveAppendix(phase11);
       continue;
     }
 
@@ -485,7 +589,13 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/diagnose" || line.startsWith("/diagnose ")) {
       diagnosing =
-        handleDiagnoseCommand(line, phase6, vehicles, agent) === "collecting";
+        (await handleDiagnoseCommand(line, phase6, vehicles, agent)) ===
+        "collecting";
+      continue;
+    }
+
+    if (line === "/obd" || line.startsWith("/obd ")) {
+      await handleObdCommand(line, phase10, agent);
       continue;
     }
 
@@ -523,6 +633,12 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/health" || line.startsWith("/health ")) {
       handleHealthCommand(line, phase8);
+      await printProactiveAppendix(phase11);
+      continue;
+    }
+
+    if (line === "/watchdogs" || line.startsWith("/watchdogs ") || line === "/watchdog" || line.startsWith("/watchdog ")) {
+      await handleWatchdogsCommand(line, phase11, agent);
       continue;
     }
 
@@ -538,6 +654,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
 
     if (line === "/due" || line.startsWith("/due ")) {
       handleDueCommand(line, vehicles, taste, agent);
+      await printProactiveAppendix(phase11);
       continue;
     }
 
@@ -624,7 +741,7 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     }
 
     if (line === "/vehicles" || line.startsWith("/vehicles ")) {
-      await handleVehiclesCommand(line, vehicles, memory);
+      await handleVehiclesCommand(line, vehicles, memory, lastVehicle);
       continue;
     }
 
@@ -698,7 +815,8 @@ async function runChatSession(providerOverride?: string): Promise<void> {
     // Active structured diagnosis: free-text answers clarifying questions
     if (diagnosing && phase6.diagnostics.isCollecting() && !line.startsWith("/")) {
       diagnosing =
-        continueDiagnosis(line, phase6, vehicles, agent) === "collecting";
+        (await continueDiagnosis(line, phase6, vehicles, agent)) ===
+        "collecting";
       continue;
     }
 
@@ -756,6 +874,16 @@ async function runChatSession(providerOverride?: string): Promise<void> {
   }
 }
 
+async function printProactiveAppendix(ctx: Phase11Context): Promise<void> {
+  try {
+    const alerts = await ctx.watchdogs.briefing();
+    const appendix = formatProactiveAppendix(alerts);
+    if (appendix.trim()) console.log(appendix + "\n");
+  } catch {
+    // never break the primary command
+  }
+}
+
 function handleConfigCommand(
   line: string,
   config: Config,
@@ -809,6 +937,7 @@ async function handleVehiclesCommand(
   line: string,
   vehicles: VehicleStore,
   memory: MemoryStore,
+  lastVehicle?: LastVehicleMemory,
 ): Promise<void> {
   const parts = line.trim().split(/\s+/);
   const cmd = parts[1];
@@ -854,6 +983,8 @@ async function handleVehiclesCommand(
       return;
     }
     try {
+      const prev = vehicles.getActive();
+      if (prev && prev.id !== id) lastVehicle?.set(prev.id);
       const v = vehicles.setActive(id);
       if (!v) {
         logger.warn("Vehicle not found.");

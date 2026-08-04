@@ -282,14 +282,15 @@ function computeHealth(
   soon: number,
 ): OwnershipHealth {
   let score = 85;
-  score -= overdue * 12;
-  score -= soon * 4;
-  score -= reliability.knownIssueCount * 5;
+  // Cap overdue penalty so sparse-history high-mileage cars don't always floor at 0
+  score -= Math.min(overdue * 12, 36);
+  score -= Math.min(soon * 4, 12);
+  score -= Math.min(reliability.knownIssueCount * 5, 20);
   if (reliability.historyGapRisk === "high") score -= 15;
   if (reliability.historyGapRisk === "medium") score -= 8;
   if (cost.recordCount === 0) score -= 10;
   if (v.currentMileage > 150000) score -= 5;
-  score = Math.max(0, Math.min(100, Math.round(score)));
+  score = Math.max(5, Math.min(100, Math.round(score)));
 
   const grade =
     score >= 90 ? "A" : score >= 75 ? "B" : score >= 60 ? "C" : score >= 40 ? "D" : "F";

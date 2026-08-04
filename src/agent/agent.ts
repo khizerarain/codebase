@@ -11,6 +11,7 @@ import { KnowledgeBase } from "../knowledge/knowledge.js";
 import type { MemoryStore } from "../memory/memory.js";
 import { LongTermMemory } from "../memory/longterm.js";
 import type { ModRegistry } from "../mods/registry.js";
+import type { ObdManager } from "../obd/manager.js";
 import {
   formatPlanForTerminal,
   PlanStore,
@@ -47,6 +48,7 @@ export class Agent {
   readonly data: LocalDataStore;
   private readonly context: ContextAssembler;
   private mods: ModRegistry | null = null;
+  private obd: ObdManager | null = null;
   private pendingPlan: Plan | null = null;
   private lastExportable = "";
   readonly exports: ExportBuffers = { last: "" };
@@ -81,6 +83,11 @@ export class Agent {
   /** Attach local mods registry (Phase 8) for skill/tool overlays. */
   setMods(mods: ModRegistry | null): void {
     this.mods = mods;
+  }
+
+  /** Attach OBD manager (Phase 10) for live data tools. */
+  setObd(obd: ObdManager | null): void {
+    this.obd = obd;
   }
 
   getPendingPlan(): Plan | null {
@@ -126,12 +133,23 @@ export class Agent {
       knowledge: this.knowledge,
       longTerm: this.longTerm,
       mods: this.mods ?? undefined,
+      obd: this.obd ?? undefined,
     };
   }
 
   private promptContext(userMessage: string, mode?: string, approvedPlan?: string) {
-    const assembled = this.context.assemble(userMessage, { mode, approvedPlan });
-    if (!this.mods) return assembled;
+    const garage = this.config.interaction?.mode === "garage";
+    const assembled = this.context.assemble(userMessage, {
+      mode,
+      approvedPlan,
+      maxExtraBlocks: garage ? 2 : 3,
+    });
+    const withStyle = {
+      ...assembled,
+      interactionMode: this.config.interaction?.mode ?? "normal",
+      verbosity: this.config.interaction?.verbosity ?? "normal",
+    };
+    if (!this.mods) return withStyle;
     const modSkills = this.mods
       .enabledSkills()
       .filter((s) => s.enabled)
@@ -146,11 +164,11 @@ export class Agent {
       .sort((a, b) => b.score - a.score)
       .slice(0, 2)
       .map((x) => x.s);
-    if (!modSkills.length) return assembled;
+    if (!modSkills.length) return withStyle;
     const extra = this.taste.formatSkillsForPrompt(modSkills);
     return {
-      ...assembled,
-      relevantSkills: `${assembled.relevantSkills.trim()}\n\n### Mod skills\n${extra}`.trim(),
+      ...withStyle,
+      relevantSkills: `${withStyle.relevantSkills.trim()}\n\n### Mod skills\n${extra}`.trim(),
     };
   }
 
@@ -308,18 +326,30 @@ export class Agent {
     const system = buildSystemPrompt(
       this.promptContext(userMessage, opts.mode, opts.approvedPlan),
     );
+    const msgLimit =
+      this.config.interaction?.mode === "garage"
+        ? Math.min(this.config.contextMessageLimit, 16)
+        : this.config.contextMessageLimit;
     const messages = [
       { role: "system" as const, content: system },
-      ...this.memory.getMessagesForPrompt(this.config.contextMessageLimit),
+      ...this.memory.getMessagesForPrompt(msgLimit),
     ];
 
     let finalContent = "";
     const observations: string[] = [];
+    const maxRounds =
+      this.config.interaction?.mode === "garage"
+        ? Math.min(this.config.maxToolRounds, 5)
+        : this.config.maxToolRounds;
 
-    for (let round = 0; round < this.config.maxToolRounds; round++) {
+    for (let round = 0; round < maxRounds; round++) {
       let llmResponse;
       try {
-        logger.dim(`  thinking (round ${round + 1})…`);
+        logger.dim(
+          this.config.interaction?.mode === "garage"
+            ? `  … ${round + 1}/${maxRounds}`
+            : `  thinking (round ${round + 1})…`,
+        );
         llmResponse = await timedAsync(`llm.round${round + 1}`, () =>
           withRetry(
             () => this.llm.chat(messages, TOOL_DEFINITIONS),
